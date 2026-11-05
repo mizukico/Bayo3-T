@@ -38,7 +38,7 @@ MARKER_ROMFS_MAIN = "# NX_CI_DISK_GUARD_RELEASE_ROMFS_AFTER_SPLIT"
 MARKER_ROMFS_SH = "# NX_CI_DISK_GUARD_SKIP_MISSING_ROMFS_VALIDATION"
 MARKER_UE_IOSTORE = "# NX_CI_UE_IOSTORE_SHADER_DECODE"
 MARKER_PROGRESS_DISK = "# NX_CI_PROGRESS_DISK_FREE"
-
+MARKER_NSP_RELEASE = "# NX_CI_DISK_GUARD_RELEASE_NSP_AFTER_AOC"
 
 def say(s: str) -> None:
     print(s, flush=True)
@@ -315,6 +315,42 @@ def patch_ipa_builder(repo: Path) -> bool:
     elif not supports_separate:
         say("[patch] upstream builder has no image-backed --romfs separate mode; skipping RomFS release patch")
 
+    # Release original NSP/XCI packages after game and DLC extraction.
+    # This is enabled only on the second build pass.
+    if MARKER_NSP_RELEASE not in src:
+        anchor = (
+            "    aoc = extract_aoc(nx, keys, repo, work, app, fam, logs)\n"
+            "    dlc_roms = sorted(p for p in aoc.iterdir() if p.is_dir() or p.suffix == '.img') if aoc else []\n"
+        )
+
+        if src.count(anchor) != 1:
+            raise RuntimeError(
+                "Could not find the unique post-extract_aoc anchor in "
+                f"{p}; refusing to add NSP cleanup."
+            )
+
+        block = (
+            f"    {MARKER_NSP_RELEASE}\n"
+            "    if os.environ.get('NX_CI_RELEASE_NSP_SPACE') == '1':\n"
+            "        _ci_nsp_suffixes = {'.nsp', '.xci', '.nsz', '.xcz'}\n"
+            "        _ci_removed_count = 0\n"
+            "        _ci_removed_bytes = 0\n"
+            "        for _ci_package in nsp_dir.iterdir():\n"
+            "            if _ci_package.is_file() and _ci_package.suffix.lower() in _ci_nsp_suffixes:\n"
+            "                _ci_size = _ci_package.stat().st_size\n"
+            "                _ci_package.unlink()\n"
+            "                _ci_removed_count += 1\n"
+            "                _ci_removed_bytes += _ci_size\n"
+            "                say(f'[CI disk guard] removed original package: {_ci_package.name} ({_ci_size / 2**30:.2f} GiB)')\n"
+            "        say(f'[CI disk guard] NSP cleanup complete: {_ci_removed_count} package(s), {_ci_removed_bytes / 2**30:.2f} GiB released')\n"
+            "        _ci_free = shutil.disk_usage(nsp_dir).free\n"
+            "        say(f'[CI disk guard] available disk space after NSP cleanup: {_ci_free / 2**30:.2f} GiB')\n"
+        )
+
+        src = src.replace(anchor, anchor + block, 1)
+        changed = True
+        say("[patch] build_ipa_from_nsp.py: release original NSP/XCI packages after DLC extraction")
+  
     # Keep the existing post-Metal cleanup of consumed Switch-side shader data.
     if MARKER_IPA not in src:
         lines = src.splitlines(keepends=True)
