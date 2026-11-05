@@ -164,6 +164,7 @@ jobs:
           GAME_URL: ${{ secrets.Game_URL }}
           UPDATE_URL: ${{ secrets.Update_URL }}
           DLC_URL: ${{ secrets.DLC_URL }}
+          DLC2_URL: ${{ secrets.DLC2_URL }}
           KEYS_URL: ${{ secrets.Keys_URL }}
         shell: bash
         run: |
@@ -201,6 +202,11 @@ jobs:
             download_file "$DLC_URL" "$WORK/dlc.download"
           else
             echo "No DLC_URL configured; continuing without DLC."
+          fi
+          if [[ -n "${DLC2_URL:-}" ]]; then
+            download_file "$DLC2_URL" "$WORK/dlc2.download"
+          else
+            echo "No DLC2_URL configured; continuing without DLC2."
           fi
           chmod 600 "$WORK/prod.keys"
       - name: Extract RAR archives or accept direct game packages
@@ -315,6 +321,7 @@ jobs:
           process_download("game")
           process_download("update")
           process_download("dlc")
+          process_download("dlc2")
           packages = sorted(
               p for p in game_dir.iterdir()
               if p.is_file()
