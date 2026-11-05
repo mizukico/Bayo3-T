@@ -243,6 +243,24 @@ def patch_ipa_builder(repo: Path) -> bool:
     src = p.read_text(encoding="utf-8")
     changed = False
 
+    # The pre-extraction guard only needs to cover extraction at this point.
+    # NSP/XCI and RomFS.img are released before Metal, so do not reserve the
+    # later shader-cache/Metal peak here.
+    reserve_marker = "# NX_CI_DISK_GUARD_EXTRACTION_RESERVE"
+    old_reserve = "    gb = sum({p.stat().st_size for b, u in picks.values() for p in (b, u) if p}) / 2**30 + 6   # extraction + shader cache + slack"
+    new_reserve = "    gb = sum({p.stat().st_size for b, u in picks.values() for p in (b, u) if p}) / 2**30 + 0.5   # extraction + 0.5 GiB safety margin " + reserve_marker
+    if reserve_marker in src:
+        say("[patch] build_ipa_from_nsp.py: extraction reserve already set to 0.5 GiB")
+    elif src.count(old_reserve) == 1:
+        src = src.replace(old_reserve, new_reserve, 1)
+        changed = True
+        say("[patch] build_ipa_from_nsp.py: extraction reserve reduced from 6 GiB to 0.5 GiB")
+    else:
+        raise RuntimeError(
+            f"Could not uniquely identify the 6 GiB pre-extraction reserve in {p}; "
+            "refusing to modify the builder."
+        )
+
     # Only the newer upstream builder has image-backed RomFS and --romfs separate.
     # The BC fallback checkout is older and keeps a directory-based RomFS bundled.
     supports_separate = (
