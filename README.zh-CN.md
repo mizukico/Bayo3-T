@@ -148,9 +148,10 @@ Artifact 保留 7 天。GitHub 下载的 Artifact 通常为 ZIP 压缩包。
 2. 工作流先上传独立的 `RomFS.img`。
 3. 删除临时上传暂存用的硬链接。
 4. 第二轮重新进入构建器，复用已经完成的解包、重写和 Shader Split 结果。
-5. 确认镜像上传成功后，在 Metal 编译前删除 Runner 上的原始 RomFS 镜像。
+5. 第二轮运行期间，NxNative 完成游戏本体及 DLC 解包（`extract_aoc()`）后，CI 补丁会删除原始 `.nsp`、`.xci`、`.nsz` 和 `.xcz` 游戏包，并记录删除数量、释放容量及清理后的可用空间。删除发生在后续 Metal 阶段之前；只有确认 NxNative 已经完成对这些源包的读取和解包后才会释放。
+6. 到达 Shader Split 后的镜像交接节点时，在确认 RomFS 上传成功后，删除 Runner 上的原始 RomFS 镜像，再继续 Metal 编译。
 
-上传暂存使用硬链接，而不是再复制一份完整的大型镜像。独立镜像已经上传到 Artifact/百度网盘，Runner 在后续 Metal 编译阶段无需继续保留本地副本。
+上传暂存使用硬链接，而不是再复制一份完整的大型镜像。独立镜像已经上传到 Artifact/百度网盘，Runner 在后续 Metal 编译阶段无需继续保留本地副本。因此，第二轮构建会先后释放两类大型文件：解包完成后的原始 NSP/XCI 游戏包，以及上传完成后的本地独立 RomFS 镜像。
 
 BC fallback 路径不支持这种独立镜像交接，仍使用上游原有的内置 RomFS 构建方式。
 
@@ -215,7 +216,9 @@ CI 补丁还会关闭这类临时 CI 构建的 Shader 缓存发布。不过，**
               拆分 Shader，在 Metal 前暂停
               上传 RomFS.img
               再次运行构建器并复用缓存
-              释放本地 RomFS，编译 Metal
+              完成游戏/DLC 解包后删除原始 NSP/XCI
+              上传完成后释放本地 RomFS
+              编译 Metal
                   |
 生成未签名 IPA
                   |
