@@ -1,0 +1,141 @@
+
+name: Transfer Existing ROMFS Artifact to Baidu
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Show runner disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h /
+          AVAILABLE=$(df -BG / | awk 'NR==2 {gsub("G","",$4); print $4}')
+          echo "Available disk: ${AVAILABLE}G"
+          if [ "$AVAILABLE" -lt 12 ]; then
+            echo "::error::Insufficient disk space. Need at least 12GB free."
+            exit 1
+          fi
+
+      - name: Download existing NxNative-ROMFS artifact
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: 13405397134
+          github-token: ${{ github.token }}
+          repository: mizukico/Bayo3-T
+          run-id: 42006986893
+          path: ${{ runner.temp }}/romfs-artifact
+
+      - name: Verify downloaded RomFS.img
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FILE="$(find "$RUNNER_TEMP/romfs-artifact" \
+            -type f -name 'RomFS.img' -print -quit)"
+
+          if [ -z "$FILE" ]; then
+            echo "::error::RomFS.img not found in downloaded artifact."
+            find "$RUNNER_TEMP/romfs-artifact" -maxdepth 3 -type f
+            exit 1
+          fi
+
+          EXPECTED="7976ae98c0c744d0e3b13e039c3183ab9877380c63a24b4368ad91e31a107efa"
+
+          echo "Downloaded file:"
+          ls -lh "$FILE"
+
+          echo "$EXPECTED  $FILE" | sha256sum -c -
+
+          echo "ROMFS_FILE=$FILE" >> "$GITHUB_ENV"
+
+      - name: Install BaiduPCS-Go
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="v4.0.2"
+          ARCHIVE="$RUNNER_TEMP/BaiduPCS-Go.zip"
+          EXTRACT="$RUNNER_TEMP/baidupcs-extract"
+
+          mkdir -p "$EXTRACT"
+
+          curl -fL --retry 3 \
+            "https://github.com/qjfoidnh/BaiduPCS-Go/releases/download/${VERSION}/BaiduPCS-Go-${VERSION}-linux-amd64.zip" \
+            -o "$ARCHIVE"
+
+          unzip -q "$ARCHIVE" -d "$EXTRACT"
+
+          BIN="$(find "$EXTRACT" -type f -name 'BaiduPCS-Go' -print -quit)"
+          test -n "$BIN"
+
+          install -m 755 "$BIN" "$RUNNER_TEMP/BaiduPCS-Go"
+
+          echo "BAIDUPCS_BIN=$RUNNER_TEMP/BaiduPCS-Go" >> "$GITHUB_ENV"
+          echo "BAIDUPCS_GO_CONFIG_DIR=$RUNNER_TEMP/baidupcs-config" >> "$GITHUB_ENV"
+
+      - name: Login to Baidu Netdisk
+        shell: bash
+        env:
+          BDUSS: ${{ secrets.BDUSS }}
+          STOKEN: ${{ secrets.STOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${BDUSS:-}" || -z "${STOKEN:-}" ]]; then
+            echo "::error::Missing BDUSS or STOKEN GitHub Secrets."
+            exit 1
+          fi
+
+          mkdir -p "$BAIDUPCS_GO_CONFIG_DIR"
+
+          "$BAIDUPCS_BIN" login \
+            "-bduss=$BDUSS" \
+            "-stoken=$STOKEN"
+
+          "$BAIDUPCS_BIN" who
+
+      - name: Upload RomFS.img to Baidu root
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Uploading RomFS.img to Baidu Netdisk root (/)"
+          ls -lh "$ROMFS_FILE"
+
+          for attempt in 1 2 3; do
+            echo "Upload attempt ${attempt}/3"
+
+            if "$BAIDUPCS_BIN" upload \
+              "$ROMFS_FILE" / \
+              --norapid \
+              --policy overwrite; then
+              echo "Upload command completed."
+              break
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Baidu upload failed after 3 attempts."
+              exit 1
+            fi
+
+            sleep $((attempt * 15))
+          done
+
+      - name: Verify Baidu root listing
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          "$BAIDUPCS_BIN" ls /
+
+          echo "Transfer workflow finished."
