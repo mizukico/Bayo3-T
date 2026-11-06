@@ -580,6 +580,12 @@ jobs:
           echo "target=$TARGET" >> "$GITHUB_OUTPUT"
           echo "Effective upload target: $TARGET"
 
+      - name: Set up Go for patched BaiduPCS-Go
+        if: steps.upload_mode.outputs.target == 'baidu'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+
       - name: Install and login to BaiduPCS-Go v4.0.2
         if: steps.upload_mode.outputs.target == 'baidu'
         shell: bash
@@ -589,8 +595,12 @@ jobs:
           set -euo pipefail
 
           BAIDU_DIR="$RUNNER_TEMP/baidupcs"
+          BAIDU_SOURCE="$RUNNER_TEMP/BaiduPCS-Go"
           BAIDU_CONFIG="$RUNNER_TEMP/baidupcs-config"
           mkdir -p "$BAIDU_DIR" "$BAIDU_CONFIG"
+
+          git clone --depth 1 --branch v4.0.2 https://github.com/qjfoidnh/BaiduPCS-Go.git "$BAIDU_SOURCE"
+          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/patch_baidupcs.py" "$BAIDU_SOURCE"
 
           if [[ "$(uname -m)" == "arm64" ]]; then
             ARCH="arm64"
@@ -598,20 +608,8 @@ jobs:
             ARCH="amd64"
           fi
 
-          ZIP="$BAIDU_DIR/BaiduPCS-Go-v4.0.2.zip"
-          URL="https://github.com/qjfoidnh/BaiduPCS-Go/releases/download/v4.0.2/BaiduPCS-Go-v4.0.2-darwin-osx-${ARCH}.zip"
-
-          curl --fail --location --retry 3 --retry-delay 3 "$URL" -o "$ZIP"
-          unzip -oq "$ZIP" -d "$BAIDU_DIR"
-
-          BIN="$(find "$BAIDU_DIR" -type f -name 'BaiduPCS-Go' -perm -u+x -print -quit)"
-          if [[ -z "$BIN" ]]; then
-            BIN="$(find "$BAIDU_DIR" -type f -name 'BaiduPCS-Go' -print -quit)"
-          fi
-          if [[ -z "$BIN" ]]; then
-            echo "::error::BaiduPCS-Go executable was not found in the release archive."
-            exit 1
-          fi
+          BIN="$BAIDU_DIR/BaiduPCS-Go"
+          (cd "$BAIDU_SOURCE" && CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" go build -trimpath -ldflags="-s -w" -o "$BIN" .)
           chmod +x "$BIN"
 
           echo "BAIDUPCS_BIN=$BIN" >> "$GITHUB_ENV"
@@ -854,4 +852,5 @@ jobs:
             "$RUNNER_TEMP/nxnative" \
             "$RUNNER_TEMP/GameFiles" \
             "$RUNNER_TEMP/baidupcs" \
+            "$RUNNER_TEMP/BaiduPCS-Go" \
             "$RUNNER_TEMP/baidupcs-config"
