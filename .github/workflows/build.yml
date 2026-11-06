@@ -157,15 +157,23 @@ jobs:
           REMOTE_PATH="/.__nxnative_upload_probe_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.bin"
           trap '"$BAIDUPCS_BIN" rm "$REMOTE_PATH" >/dev/null 2>&1 || true; rm -f "$TEST_FILE"' EXIT
 
-          # Use non-empty random content so this exercises an actual upload, not a directory listing.
-          dd if=/dev/urandom of="$TEST_FILE" bs=1024 count=64
-          echo "===== Baidu upload preflight: 64 KiB test file ====="
+          # 1 MiB of random data prevents a hash-only/empty-file check and exercises data transfer.
+          dd if=/dev/urandom of="$TEST_FILE" bs=1024 count=1024
+          echo "===== Baidu upload preflight: 1 MiB test file ====="
           ls -lh "$TEST_FILE"
 
           "$BAIDUPCS_BIN" upload "$TEST_FILE" / --norapid --policy overwrite
           echo "===== Verify uploaded test file ====="
           "$BAIDUPCS_BIN" ls "$REMOTE_PATH"
-          echo "Baidu upload preflight passed; game downloads may proceed."
+          echo "===== Remove test file from Baidu Netdisk ====="
+          "$BAIDUPCS_BIN" rm "$REMOTE_PATH"
+          if "$BAIDUPCS_BIN" ls "$REMOTE_PATH" >/dev/null 2>&1; then
+            echo "::error::Baidu test file still exists after cleanup."
+            exit 1
+          fi
+          rm -f "$TEST_FILE"
+          trap - EXIT
+          echo "Baidu upload, remote verification, and cleanup all passed; game downloads may proceed."
 
       # ==========================================
       # Xcode 组件磁盘占用盘点
