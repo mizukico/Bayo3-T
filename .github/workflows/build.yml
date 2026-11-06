@@ -162,13 +162,41 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Install dependencies
+        env:
+          NX_DEVICE: ${{ inputs.device }}
         shell: bash
         run: |
           set -euo pipefail
           brew install glslang xcodegen zstd spirv-cross unar
           python -m pip install --upgrade pip
-          python -m pip install \
-            lz4 capstone fonttools backports.zstd gdown
+
+          if [[ "$NX_DEVICE" == "iPhone 15 Pro/Pro Max or newer (standard)" ]]; then
+            # Use the exact pinned Python toolchain maintained by upstream NxNative.
+            REQUIREMENTS="$GITHUB_WORKSPACE/.github/requirements/tools.txt"
+            echo "Python executable: $(python -c 'import sys; print(sys.executable)')"
+            echo "Upstream requirements file: $REQUIREMENTS"
+            test -s "$REQUIREMENTS"
+            echo "===== Upstream Python tool requirements ====="
+            cat "$REQUIREMENTS"
+            if ! grep -Eq '^zbic([<=>!~]|$)' "$REQUIREMENTS"; then
+              echo "::error::The checked-out upstream tools.txt does not declare zbic."
+              exit 1
+            fi
+
+            python -m pip install -r "$REQUIREMENTS" gdown
+
+            # Python 3.13 does not include compression.zstd in the standard library.
+            if python -c 'import sys; raise SystemExit(sys.version_info < (3, 14))'; then
+              python -m pip install backports.zstd
+            fi
+
+            echo "===== Verify NxNative Python prerequisites ====="
+            python -m pip show zbic
+            python -c 'import sys, zbic, lz4.block, capstone, fontTools; print("Verified Python:", sys.executable); print("zbic:", zbic.__file__)'
+          else
+            # The pinned BC-fallback checkout predates the upstream tools.txt manifest.
+            python -m pip install lz4 capstone fonttools backports.zstd gdown
+          fi
 
       - name: Remove stale NxNative temporary files
         shell: bash
