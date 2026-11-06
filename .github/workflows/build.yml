@@ -620,12 +620,6 @@ jobs:
           "$BIN" login -cookies="$BAIDU_COOKIES"
           "$BIN" who
 
-          REMOTE_DIR="/Bayo3-T/$DM_GAME/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          echo "BAIDU_REMOTE_DIR=$REMOTE_DIR" >> "$GITHUB_ENV"
-
-          "$BIN" mkdir -p "$REMOTE_DIR"
-          echo "Baidu Netdisk destination prepared: $REMOTE_DIR"
-
       # ===== First pass: extract, rewrite and split shaders; stop before Metal =====
       - name: Prepare shader split and RomFS for upload
         id: prepare
@@ -684,15 +678,18 @@ jobs:
           FILE="$RUNNER_TEMP/romfs-handoff/RomFS.img"
           [[ -s "$FILE" ]] || { echo "::error::RomFS.img is missing."; exit 1; }
 
+          echo "Uploading RomFS.img to Baidu Netdisk root directory."
+
           for attempt in 1 2 3; do
             echo "Baidu RomFS upload attempt $attempt/3"
-            if "$BAIDUPCS_BIN" upload "$FILE" "$BAIDU_REMOTE_DIR" --norapid --policy overwrite; then
-              echo "Upload command completed; checking remote directory."
-              if "$BAIDUPCS_BIN" ls "$BAIDU_REMOTE_DIR"; then
+            if "$BAIDUPCS_BIN" upload "$FILE" / --norapid --policy overwrite; then
+              echo "Upload command completed; checking remote root directory."
+              if "$BAIDUPCS_BIN" ls /; then
                 echo "RomFS upload command and remote listing completed."
                 exit 0
               fi
             fi
+
             if [[ "$attempt" -lt 3 ]]; then
               echo "RomFS upload/verification failed; retrying in $((attempt * 15)) seconds."
               sleep $((attempt * 15))
@@ -701,7 +698,7 @@ jobs:
 
           echo "::error::RomFS.img upload failed after 3 attempts."
           exit 1
-
+          
       - name: Upload RomFS as GitHub Artifact
         if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.target == 'artifact'
         uses: actions/upload-artifact@v4
@@ -774,7 +771,7 @@ jobs:
 
           for attempt in 1 2 3; do
             echo "Baidu IPA upload attempt $attempt/3"
-            if "$BAIDUPCS_BIN" upload "$FILE" "$BAIDU_REMOTE_DIR" --norapid --policy overwrite; then
+            if "$BAIDUPCS_BIN" upload "$FILE" / --norapid --policy overwrite; then
               echo "Upload command completed; checking remote directory."
               if "$BAIDUPCS_BIN" ls "$BAIDU_REMOTE_DIR"; then
                 echo "IPA upload command and remote listing completed."
