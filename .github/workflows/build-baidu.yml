@@ -175,7 +175,10 @@ jobs:
           echo "Preflight file generated: $(ls -lh "$TEST_FILE")"
 
       - name: Verify Baidu upload with the production Action
+        id: verify_baidu_upload
         if: steps.upload_mode.outputs.img_target == 'baidu' || steps.upload_mode.outputs.ipa_target == 'baidu'
+        timeout-minutes: 10
+        continue-on-error: true
         uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
         with:
           bduss: ${{ secrets.BDUSS }}
@@ -732,7 +735,7 @@ jobs:
 
       - name: Upload RomFS to Baidu Netdisk before Metal
         id: upload_romfs_baidu
-        if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.img_target == 'baidu'
+        if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.img_target == 'baidu' && steps.verify_baidu_upload.outcome == 'success'
         timeout-minutes: 60
         continue-on-error: true
         uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
@@ -744,7 +747,7 @@ jobs:
           upload-policy: overwrite
           
       - name: Upload RomFS as GitHub Artifact
-        if: success() && steps.prepare.outputs.romfs_ready == 'true' && (steps.upload_mode.outputs.img_target == 'artifact' || steps.upload_romfs_baidu.outcome == 'failure')
+        if: success() && steps.prepare.outputs.romfs_ready == 'true' && (steps.upload_mode.outputs.img_target == 'artifact' || steps.verify_baidu_upload.outcome != 'success' || steps.upload_romfs_baidu.outcome == 'failure')
         uses: actions/upload-artifact@v4
         with:
           name: NxNative-ROMFS
@@ -807,7 +810,7 @@ jobs:
 
       - name: Upload IPA to Baidu Netdisk
         id: upload_ipa_baidu
-        if: success() && steps.upload_mode.outputs.ipa_target == 'baidu'
+        if: success() && steps.upload_mode.outputs.ipa_target == 'baidu' && steps.verify_baidu_upload.outcome == 'success'
         timeout-minutes: 60
         continue-on-error: true
         uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
@@ -853,7 +856,7 @@ jobs:
           python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/nxnative_ci_guard.py" stop
 
       - name: Upload IPA as GitHub Artifact
-        if: success() && (steps.upload_mode.outputs.ipa_target == 'artifact' || steps.upload_ipa_baidu.outcome == 'failure')
+        if: success() && (steps.upload_mode.outputs.ipa_target == 'artifact' || steps.verify_baidu_upload.outcome != 'success' || steps.upload_ipa_baidu.outcome == 'failure')
         uses: actions/upload-artifact@v4
         with:
           name: NxNative-IPA-${{ inputs.device == 'iPhone 15 or older (BC fallback)' && 'BC-Fallback' || 'Standard' }}
