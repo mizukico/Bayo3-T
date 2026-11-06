@@ -8,9 +8,9 @@ permissions:
 
 jobs:
   upload-probe:
-    name: Upload a 1 MiB probe file
+    name: Upload a 10 MiB probe file
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Check Baidu credentials are configured
@@ -30,17 +30,17 @@ jobs:
           fi
           echo "Both required Baidu credentials are present."
 
-      - name: Generate a unique 1 MiB test file
+      - name: Generate a unique 10 MiB test file
         id: probe
         shell: bash
         run: |
           set -euo pipefail
           FILE="$RUNNER_TEMP/baidu-action-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.bin"
-          dd if=/dev/urandom of="$FILE" bs=1M count=1 status=none
-          test "$(stat -c '%s' "$FILE")" -eq 1048576
+          dd if=/dev/urandom of="$FILE" bs=1M count=10 status=none
+          test "$(stat -c '%s' "$FILE")" -eq 10485760
           echo "path=$FILE" >> "$GITHUB_OUTPUT"
           echo "filename=$(basename "$FILE")" >> "$GITHUB_OUTPUT"
-          echo "Generated 1 MiB upload probe: $(basename "$FILE")"
+          echo "Generated 10 MiB upload probe: $(basename "$FILE")"
 
       - name: Create a unique remote test folder
         shell: bash
@@ -84,9 +84,9 @@ jobs:
           {
             echo "## Baidu Netdisk Action test"
             echo
-            echo "The Action completed successfully for a 1 MiB test file."
+            echo "The Action completed successfully for a 10 MiB test file."
             echo
-            printf 'Remote path: /%s\n' "$PROBE_NAME"
+            printf 'Remote path: %s/%s\n' "$REMOTE_DIR" "$PROBE_NAME"
             echo
             echo "The test file is intentionally left in its uniquely named folder for manual verification."
           } >> "$GITHUB_STEP_SUMMARY"
