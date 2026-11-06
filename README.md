@@ -148,9 +148,10 @@ For the Standard path that supports image-backed `--romfs separate`, the workflo
 2. The workflow uploads the standalone `RomFS.img` before continuing.
 3. The temporary upload staging hard link is removed.
 4. The second pass re-enters the builder and reuses the existing extraction/rewrite/shader-split work.
-5. The original local RomFS image is deleted after the upload has succeeded and before Metal compilation.
+5. During this second pass, after NxNative has completed game and DLC extraction (`extract_aoc()`), the CI patch deletes the original `.nsp`, `.xci`, `.nsz`, and `.xcz` package files. It reports the number and total size removed, plus the resulting free disk space. This happens before the later Metal stage; the packages are retained until NxNative has finished consuming them.
+6. At the post-split handoff point, the original local RomFS image is deleted after the upload has succeeded and before Metal compilation.
 
-The handoff uses a hard link for the staging file, rather than creating another full copy of the large image. The separate image remains available as the uploaded artifact/Netdisk output; the runner does not need to retain its local copy during the later Metal build.
+The handoff uses a hard link for the staging file, rather than creating another full copy of the large image. The separate image remains available as the uploaded artifact/Netdisk output; the runner does not need to retain its local copy during the later Metal build. Thus, the second pass frees two different classes of large input: the original game packages after extraction, and the local standalone RomFS image after upload.
 
 The BC fallback path does not support this separate-image handoff and keeps its upstream bundled-RomFS behavior.
 
@@ -215,7 +216,9 @@ First NxNative build pass
               split shaders and pause before Metal
               upload RomFS.img
               rerun builder and reuse cached work
-              release local RomFS and compile Metal
+              delete original NSP/XCI packages after extraction
+              release local RomFS after upload
+              compile Metal
                   |
 Create unsigned IPA
                   |
