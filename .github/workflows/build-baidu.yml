@@ -134,6 +134,12 @@ jobs:
           echo "BAIDUPCS_GO_CONFIG_DIR=$BAIDU_CONFIG" >> "$GITHUB_ENV"
 
           "$BAIDU_BIN" login "-bduss=$BDUSS" "-stoken=$STOKEN"
+
+          # SVIP tuning: 16 connections per file, up to 2 files concurrently.
+          "$BAIDU_BIN" config set -max_parallel 16
+          "$BAIDU_BIN" config set -max_download_load 2
+          "$BAIDU_BIN" config show
+
           "$BAIDU_BIN" who
 
           if [[ "$REQUESTED_UPLOAD_TARGET" == "baidu" ]]; then
@@ -237,7 +243,7 @@ jobs:
             for attempt in 1 2 3; do
               rm -rf "$stage"/*
               if "$BAIDUPCS_BIN" download "$remote_path" \
-                  --saveto "$stage" --ow -p 1 --retry 5; then
+                  --saveto "$stage" --ow -p 16 -l 1 --retry 5; then
                 downloaded="$(find "$stage" -type f -print -quit)"
                 if [[ -n "$downloaded" && -s "$downloaded" ]]; then
                   break
@@ -274,7 +280,7 @@ jobs:
           mkdir -p "$GAME_STAGE"
           echo "Downloading game directory recursively: $GAME_PATH"
           "$BAIDUPCS_BIN" download "$GAME_PATH" \
-            --saveto "$GAME_STAGE" --ow -p 1 --retry 5
+            --saveto "$GAME_STAGE" --ow -p 16 -l 2 --retry 5
 
           # Keep NSP/XCI files in the original download tree. They will be
           # moved directly into GameFiles by the package-preparation step.
