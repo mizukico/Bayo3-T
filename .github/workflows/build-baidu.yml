@@ -830,7 +830,6 @@ jobs:
           cat > "$ENV_FILE" <<'EOF'
           DM_PSO_MTL4=1
           DM_PSO_PREBUILD=1
-          DM_PSO_HYBRID=1
           EOF
           echo "DM_ENV_FILE=$ENV_FILE" >> "$GITHUB_ENV"
           echo "Runtime Metal 4, pipeline prebuild and hybrid pipelines enabled:"
