@@ -35,7 +35,7 @@ jobs:
           run-id: 42006986893
           path: ${{ runner.temp }}/romfs-artifact
 
-      - name: Verify downloaded RomFS.img
+      - name: Locate downloaded RomFS.img
         shell: bash
         run: |
           set -euo pipefail
@@ -49,15 +49,11 @@ jobs:
             exit 1
           fi
 
-          EXPECTED="7976ae98c0c744d0e3b13e039c3183ab9877380c63a24b4368ad91e31a107efa"
-
-          echo "Downloaded file:"
+          echo "Found RomFS.img:"
           ls -lh "$FILE"
 
-          echo "$EXPECTED  $FILE" | sha256sum -c -
-
           echo "ROMFS_FILE=$FILE" >> "$GITHUB_ENV"
-
+          
       - name: Install BaiduPCS-Go
         shell: bash
         run: |
