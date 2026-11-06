@@ -19,6 +19,8 @@ These labels select build configurations; they are not compatibility guarantees.
 
 ## What this repository adds
 
+- **Major disk-space optimization:** reduce the upstream extraction preflight's extra reserve from 6 GiB to 0.5 GiB while retaining the extracted-size estimate and real free-space check; move rather than copy packages; release original NSP/XCI after extraction; upload and release standalone RomFS before Metal; and clean consumed shader data after Metal.
+
 - **Manual workflow dispatch:** select the device/build path, provide an optional 16-character base-game Title ID override, and choose the output destination.
 - **Secret-based downloads:** download the base game package, optional update/DLC packages, and `prod.keys` using URLs stored in GitHub Actions secrets.
 - **Package preparation:** accept direct NSP/XCI packages or supported RAR archives containing NSP/XCI/NSZ/XCZ packages; validate package signatures and move files into the build input directory instead of making duplicate copies.
@@ -111,17 +113,62 @@ This preflight is intentional: it checks the credentials and upload route before
 
 ## Disk-space optimizations
 
-The main engineering goal is to reduce peak disk usage on the GitHub-hosted macOS runner, especially during Metal shader compilation.
+Disk-space reduction is a core feature of this repository, not just diagnostic logging. The workflow changes both the upstream extraction preflight threshold and the lifetime of large build inputs/intermediates so the runner does not need to hold every large file at the same time.
 
-1. **Move prepared game packages instead of copying them.** Packages extracted from RAR archives or downloaded directly are moved into `$RUNNER_TEMP/GameFiles`, avoiding a second full-size copy.
-2. **Remove download staging files.** After package preparation, leftover `.download` files and temporary extracted RAR directories are deleted. The validated game packages required by NxNative are retained.
-3. **Measure actual free space.** The workflow reports available root-volume space with `df` after package preparation and records free-space data during the build.
-4. **Upload the separate RomFS image before Metal compilation.** On the supported Standard/NVN path, the first build pass stops after shader splitting and stages `RomFS.img` for upload.
-5. **Release local RomFS before Metal.** After upload, the second build pass reuses cached extraction/rewrite/shader work and releases the local RomFS image before Metal compilation.
-6. **Release consumed source data at safe points.** CI patches coordinate shader cleanup and release the original NSP/XCI data after extraction and shader data after it is no longer needed.
-7. **Monitor and report.** A background monitor records free space and selected build-directory sizes. A final disk report is collected even when the build fails.
+### 1. Reduce the extraction preflight reserve: 6 GiB → 0.5 GiB
 
-The workflow deliberately does not run a blanket Xcode cache cleanup or a separate pre-build Xcode directory audit. A newly provisioned runner should not be assumed to contain useful project-specific build caches.
+The upstream `build_ipa_from_nsp.py` estimates the space required for extraction from the source data/tree size, then adds a fixed **6 GiB safety reserve**. The guard patch changes only that extra reserve to **0.5 GiB**.
+
+- The extracted-size estimate is still calculated.
+- The real available-space comparison (`free_gb(work) < gb`) is still performed.
+- The separate check for insufficient IPA output space (the upstream **5 GB** check) is not removed.
+- This is a reduction of the conservative reserve, **not removal or bypass of the extraction-space preflight**.
+
+Why this is reasonable for this workflow: the later build no longer needs to keep the original NSP/XCI packages, standalone RomFS image, and consumed shader intermediates occupying disk through the Metal stage. Those files are released at defined safe points below. Reserving the later peak in full during the initial extraction check would therefore be unnecessarily conservative. The trade-off is that a runner with genuinely insufficient space can still run out of disk later; the live monitor and cleanup steps do not guarantee capacity.
+
+### 2. Move packages instead of duplicating them
+
+- Packages extracted from RAR archives are moved into `$RUNNER_TEMP/GameFiles`.
+- Directly downloaded NSP/XCI packages are also moved from the download staging directory into `GameFiles`.
+- The workflow removes leftover `.download` files and temporary extracted-RAR directories after package preparation.
+
+This avoids keeping a second full-size copy of each game package. The validated package files remain available to NxNative until extraction has consumed them.
+
+### 3. Release original NSP/XCI after game and DLC extraction
+
+On the second build pass, the CI patch removes the original `.nsp`, `.xci`, `.nsz`, and `.xcz` inputs after `extract_aoc()` has completed. It reports the number and total size of removed packages and the resulting free disk space.
+
+The deletion is deliberately delayed until extraction has finished; the source packages are not deleted before NxNative has consumed them.
+
+### 4. Split the Standard/NVN build around the RomFS upload
+
+For the Standard path that supports image-backed `--romfs separate`, the workflow uses two passes:
+
+1. The first pass extracts game data, rewrites and splits shaders, then stops before Metal compilation.
+2. The workflow uploads the standalone `RomFS.img` before continuing.
+3. The temporary upload staging hard link is removed.
+4. The second pass re-enters the builder and reuses the existing extraction/rewrite/shader-split work.
+5. The original local RomFS image is deleted after the upload has succeeded and before Metal compilation.
+
+The handoff uses a hard link for the staging file, rather than creating another full copy of the large image. The separate image remains available as the uploaded artifact/Netdisk output; the runner does not need to retain its local copy during the later Metal build.
+
+The BC fallback path does not support this separate-image handoff and keeps its upstream bundled-RomFS behavior.
+
+### 5. Release consumed shader data after Metal
+
+After the iOS Metal shader build succeeds, the workflow removes the consumed `shader/pkg` and `shader/cache` directories while retaining `shader/ios` for IPA packaging.
+
+The CI patch also disables shader cache publication for these ephemeral CI builds. It intentionally does **not** delete translator `.bin`, `.spv`, reflection, or job files early: upstream `fin()` tasks may still read them. The upstream translator temporary-directory cleanup remains responsible for deleting those files after all finishing tasks complete. This avoids a race that could break shader output.
+
+### 6. Live disk monitoring and emergency reserve
+
+- The workflow reports actual free space with `df` after game-package preparation and at key build stages.
+- The progress display adds current root-volume free space to the iOS shader progress line.
+- A background monitor records free space periodically and takes deeper snapshots of selected build directories.
+- The monitor allocates a real **256 MiB emergency reserve**. If free space falls to **8 GiB or less**, it removes that reserve file to leave some room for the runner and log-writing operations.
+- The final monitor report is collected when the build stops.
+
+These measures improve visibility and reclaim space at known safe points; they do not create extra runner storage or guarantee that every game fits.
 
 ## CI helper: `.github/scripts/nxnative_ci_guard.py`
 
