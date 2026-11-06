@@ -247,19 +247,36 @@ def patch_ipa_builder(repo: Path) -> bool:
     # NSP/XCI and RomFS.img are released before Metal, so do not reserve the
     # later shader-cache/Metal peak here.
     reserve_marker = "# NX_CI_DISK_GUARD_EXTRACTION_RESERVE"
-    old_reserve = "    gb = sum({p.stat().st_size for b, u in picks.values() for p in (b, u) if p}) / 2**30 + 6   # extraction + shader cache + slack"
-    new_reserve = "    gb = sum({p.stat().st_size for b, u in picks.values() for p in (b, u) if p}) / 2**30 + 0.5   # extraction + 0.5 GiB safety margin " + reserve_marker
+
+    import re
+
+    reserve_pattern = re.compile(
+        r"(?m)^(\s*gb\s*=.*?/ 2\*\*30)\s*\+\s*6(\s*#.*)$"
+    )
+
     if reserve_marker in src:
         say("[patch] build_ipa_from_nsp.py: extraction reserve already set to 0.5 GiB")
-    elif src.count(old_reserve) == 1:
-        src = src.replace(old_reserve, new_reserve, 1)
+    else:
+        src, replacements = reserve_pattern.subn(
+            lambda m: (
+                m.group(1)
+                + " + 0.5"
+                + m.group(2)
+                + " "
+                + reserve_marker
+            ),
+            src,
+            count=1,
+        )
+
+        if replacements != 1:
+            raise RuntimeError(
+                f"Could not uniquely identify the 6 GiB pre-extraction reserve in {p}; "
+                f"found {replacements} matches, refusing to modify the builder."
+            )
+
         changed = True
         say("[patch] build_ipa_from_nsp.py: extraction reserve reduced from 6 GiB to 0.5 GiB")
-    else:
-        raise RuntimeError(
-            f"Could not uniquely identify the 6 GiB pre-extraction reserve in {p}; "
-            "refusing to modify the builder."
-        )
 
     # Only the newer upstream builder has image-backed RomFS and --romfs separate.
     # The BC fallback checkout is older and keeps a directory-based RomFS bundled.
