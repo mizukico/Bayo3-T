@@ -600,6 +600,65 @@ jobs:
           echo "DM_GAME=$PROFILE_ID" >> "$GITHUB_ENV"
           echo "DETECTED_TITLE_ID=$DETECTED_ID" >> "$GITHUB_ENV"
 
+      - name: Enable FFR Metal 4 and offline PSO archive
+        shell: bash
+        env:
+          DEVICE_MODE: ${{ inputs.device }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$DEVICE_MODE" != "iPhone 15 Pro/Pro Max or newer (standard)" ]]; then
+            echo "::error::FFR Metal 4 test requires the standard seedds/nxnative build, not BC fallback."
+            exit 1
+          fi
+
+          case "$DM_GAME" in
+            0100B8A026F14000|0100606026F12000) ;;
+            *)
+              echo "::error::This test branch is configured for FFR only. Detected profile: $DM_GAME"
+              exit 1
+              ;;
+          esac
+
+          PROFILE_FILE="$GITHUB_WORKSPACE/dm/games/$DM_GAME/game.tsv"
+          if [[ ! -f "$PROFILE_FILE" ]]; then
+            echo "::error::FFR profile not found: $PROFILE_FILE"
+            exit 1
+          fi
+
+          python - "$PROFILE_FILE" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          lines = path.read_text(encoding="utf-8").splitlines()
+          settings = {"pso_mtl4": "on", "pso_gpu": "g18p"}
+          found = set()
+          output = []
+          for line in lines:
+              key = line.split("\t", 1)[0] if line and not line.startswith("#") else ""
+              if key in settings:
+                  output.append(f"{key}\t{settings[key]}")
+                  found.add(key)
+              else:
+                  output.append(line)
+          for key, value in settings.items():
+              if key not in found:
+                  output.append(f"{key}\t{value}")
+          path.write_text("\n".join(output) + "\n", encoding="utf-8")
+
+          check = {}
+          for line in path.read_text(encoding="utf-8").splitlines():
+              if line and not line.startswith("#") and "\t" in line:
+                  key, value = line.split("\t", 1)
+                  check[key] = value
+          for key, expected in settings.items():
+              if check.get(key) != expected:
+                  raise SystemExit(f"Failed to set {key}={expected}: got {check.get(key)!r}")
+          print(f"FFR profile updated: {path}")
+          print("pso_mtl4=on; pso_gpu=g18p")
+          PY
+
       - name: Update shader toolchain lock and header
         shell: bash
         run: |
@@ -694,6 +753,20 @@ jobs:
         run: |
           rm -f "$RUNNER_TEMP/romfs-handoff/RomFS.img"
 
+      - name: Configure runtime Metal 4 and pipeline prebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENV_FILE="$RUNNER_TEMP/ffr-metal4-env.txt"
+          cat > "$ENV_FILE" <<'EOF'
+          DM_PSO_MTL4=1
+          DM_PSO_PREBUILD=1
+          DM_PSO_HYBRID=1
+          EOF
+          echo "DM_ENV_FILE=$ENV_FILE" >> "$GITHUB_ENV"
+          echo "Runtime Metal 4, pipeline prebuild and hybrid pipelines enabled:"
+          cat "$ENV_FILE"
+
       # ===== Second pass: reuse extraction/rewrite/split, release RomFS, build Metal and IPA =====
       - name: Build unsigned IPA
         if: success()
@@ -704,6 +777,8 @@ jobs:
           NX_CI_RELEASE_SHADER_SPACE: "1"
           NX_CI_RELEASE_ROMFS: ${{ inputs.device == 'iPhone 15 Pro/Pro Max or newer (standard)' && '1' || '' }}
           NX_CI_RELEASE_NSP_SPACE: "1"
+          DM_PSO_GPUS: g18p
+          DM_PSO_IOS_MIN: "26.0"
         run: |
           set -euo pipefail
           WORK="$RUNNER_TEMP/nxnative"
