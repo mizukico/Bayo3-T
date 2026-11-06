@@ -620,6 +620,9 @@ jobs:
           "$BIN" login -cookies="$BAIDU_COOKIES"
           "$BIN" who
 
+          echo "===== Verify Baidu Netdisk API access ====="
+          "$BIN" ls /
+
       # ===== First pass: extract, rewrite and split shaders; stop before Metal =====
       - name: Prepare shader split and RomFS for upload
         id: prepare
