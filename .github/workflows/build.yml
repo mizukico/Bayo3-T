@@ -772,8 +772,8 @@ jobs:
           for attempt in 1 2 3; do
             echo "Baidu IPA upload attempt $attempt/3"
             if "$BAIDUPCS_BIN" upload "$FILE" / --norapid --policy overwrite; then
-              echo "Upload command completed; checking remote directory."
-              if "$BAIDUPCS_BIN" ls "$BAIDU_REMOTE_DIR"; then
+              echo "Upload command completed; checking remote root directory."
+              if "$BAIDUPCS_BIN" ls /; then
                 echo "IPA upload command and remote listing completed."
                 exit 0
               fi
