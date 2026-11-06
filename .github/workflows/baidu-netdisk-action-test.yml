@@ -61,7 +61,7 @@ jobs:
             echo
             echo "The Action completed successfully for a 1 MiB test file."
             echo
-            echo "Remote path: `/$PROBE_NAME`"
+            printf 'Remote path: /%s\n' "$PROBE_NAME"
             echo
             echo "The test file is intentionally left in the Netdisk root for manual verification."
           } >> "$GITHUB_STEP_SUMMARY"
