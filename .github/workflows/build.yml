@@ -16,6 +16,14 @@ on:
         required: false
         type: string
         default: "0100B8A026F14000"
+      upload_target:
+        description: "Choose where to upload build outputs"
+        required: true
+        type: choice
+        default: "artifact"
+        options:
+          - "artifact"
+          - "baidu"
 
 permissions:
   contents: read
@@ -39,7 +47,7 @@ jobs:
         with:
           repository: seedds/nxnative
           ref: main
-          
+
       - name: Checkout workflow helper
         uses: actions/checkout@v4
         with:
@@ -72,12 +80,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install \
             lz4 capstone fonttools backports.zstd gdown
+
       - name: Remove stale NxNative temporary files
         shell: bash
         run: |
           set -euo pipefail
           python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/nxnative_ci_guard.py" preclean "$RUNNER_TEMP"
-          
+
       # ==========================================
       # Xcode 组件磁盘占用盘点
       # ==========================================
@@ -129,6 +138,7 @@ jobs:
           df -i /
           echo ""
           echo "========== Xcode Audit Complete =========="
+
       - name: Free Disk Space - Remove Unneeded Xcode Components
         shell: bash
         continue-on-error: true
@@ -158,7 +168,7 @@ jobs:
           echo ""
           echo "========== Disk After Cleanup =========="
           df -h /
-          
+
       - name: Download game files and keys
         env:
           GAME_URL: ${{ secrets.Game_URL }}
@@ -209,6 +219,7 @@ jobs:
             echo "No DLC2_URL configured; continuing without DLC2."
           fi
           chmod 600 "$WORK/prod.keys"
+
       - name: Extract RAR archives or accept direct game packages
         shell: bash
         run: |
@@ -334,6 +345,7 @@ jobs:
               print(f"{package.name}: {package.stat().st_size:,} bytes")
           PY
           test -s "$WORK/prod.keys"
+
       - name: Inspect APFS Storage
         shell: bash
         run: |
@@ -345,7 +357,7 @@ jobs:
           diskutil info /
           echo "===== Filesystem Usage ====="
           df -h /
-          
+
       - name: Clean Up Original Game Downloads
         shell: bash
         run: |
@@ -362,6 +374,7 @@ jobs:
           ls -lh "$GAME_DIR"
           echo "===== After Cleanup ====="
           df -h /
+
       - name: Start disk monitor
         shell: bash
         env:
@@ -370,6 +383,7 @@ jobs:
         run: |
           set -euo pipefail
           python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/nxnative_ci_guard.py" start
+
       - name: Detect game title ID and select shader profile
         env:
           PROFILE_OVERRIDE: ${{ inputs.profile_id }}
@@ -531,6 +545,7 @@ jobs:
           echo "Shader profile ID: $PROFILE_ID"
           echo "DM_GAME=$PROFILE_ID" >> "$GITHUB_ENV"
           echo "DETECTED_TITLE_ID=$DETECTED_ID" >> "$GITHUB_ENV"
+
       - name: Update shader toolchain lock and header
         shell: bash
         run: |
@@ -544,7 +559,73 @@ jobs:
             exit 1
           fi
           python "$CHAIN_SCRIPT" --header
-   
+
+      # Resolve the upload destination only after DM_GAME has been detected.
+      # If the Secret is absent, keep the normal GitHub Artifact path.
+      - name: Select upload destination
+        id: upload_mode
+        shell: bash
+        env:
+          REQUESTED_UPLOAD_TARGET: ${{ inputs.upload_target }}
+          BAIDU_COOKIES: ${{ secrets.BAIDU_COOKIES }}
+        run: |
+          set -euo pipefail
+          TARGET="$REQUESTED_UPLOAD_TARGET"
+
+          if [[ "$TARGET" == "baidu" && -z "${BAIDU_COOKIES:-}" ]]; then
+            echo "::warning::BAIDU_COOKIES is not configured; falling back to GitHub Artifact."
+            TARGET="artifact"
+          fi
+
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "Effective upload target: $TARGET"
+
+      - name: Install and login to BaiduPCS-Go v4.0.2
+        if: steps.upload_mode.outputs.target == 'baidu'
+        shell: bash
+        env:
+          BAIDU_COOKIES: ${{ secrets.BAIDU_COOKIES }}
+        run: |
+          set -euo pipefail
+
+          BAIDU_DIR="$RUNNER_TEMP/baidupcs"
+          BAIDU_CONFIG="$RUNNER_TEMP/baidupcs-config"
+          mkdir -p "$BAIDU_DIR" "$BAIDU_CONFIG"
+
+          if [[ "$(uname -m)" == "arm64" ]]; then
+            ARCH="arm64"
+          else
+            ARCH="amd64"
+          fi
+
+          ZIP="$BAIDU_DIR/BaiduPCS-Go-v4.0.2.zip"
+          URL="https://github.com/qjfoidnh/BaiduPCS-Go/releases/download/v4.0.2/BaiduPCS-Go-v4.0.2-darwin-osx-${ARCH}.zip"
+
+          curl --fail --location --retry 3 --retry-delay 3 "$URL" -o "$ZIP"
+          unzip -oq "$ZIP" -d "$BAIDU_DIR"
+
+          BIN="$(find "$BAIDU_DIR" -type f -name 'BaiduPCS-Go' -perm -u+x -print -quit)"
+          if [[ -z "$BIN" ]]; then
+            BIN="$(find "$BAIDU_DIR" -type f -name 'BaiduPCS-Go' -print -quit)"
+          fi
+          if [[ -z "$BIN" ]]; then
+            echo "::error::BaiduPCS-Go executable was not found in the release archive."
+            exit 1
+          fi
+          chmod +x "$BIN"
+
+          echo "BAIDUPCS_BIN=$BIN" >> "$GITHUB_ENV"
+          echo "BAIDUPCS_GO_CONFIG_DIR=$BAIDU_CONFIG" >> "$GITHUB_ENV"
+
+          "$BIN" login -cookies="$BAIDU_COOKIES"
+          "$BIN" who
+
+          REMOTE_DIR="/Bayo3-T/$DM_GAME/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "BAIDU_REMOTE_DIR=$REMOTE_DIR" >> "$GITHUB_ENV"
+
+          "$BIN" mkdir -p "$REMOTE_DIR"
+          echo "Baidu Netdisk destination prepared: $REMOTE_DIR"
+
       # ===== First pass: extract, rewrite and split shaders; stop before Metal =====
       - name: Prepare shader split and RomFS for upload
         id: prepare
@@ -595,9 +676,34 @@ jobs:
             exit 1
           fi
 
-      # Upload only when the Standard/NVN first pass actually created the handoff.
-      - name: Upload RomFS before Metal compilation
-        if: success() && steps.prepare.outputs.romfs_ready == 'true'
+      - name: Upload RomFS to Baidu Netdisk before Metal
+        if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.target == 'baidu'
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE="$RUNNER_TEMP/romfs-handoff/RomFS.img"
+          [[ -s "$FILE" ]] || { echo "::error::RomFS.img is missing."; exit 1; }
+
+          for attempt in 1 2 3; do
+            echo "Baidu RomFS upload attempt $attempt/3"
+            if "$BAIDUPCS_BIN" upload "$FILE" "$BAIDU_REMOTE_DIR" --norapid --policy overwrite; then
+              echo "Upload command completed; checking remote directory."
+              if "$BAIDUPCS_BIN" ls "$BAIDU_REMOTE_DIR"; then
+                echo "RomFS upload command and remote listing completed."
+                exit 0
+              fi
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              echo "RomFS upload/verification failed; retrying in $((attempt * 15)) seconds."
+              sleep $((attempt * 15))
+            fi
+          done
+
+          echo "::error::RomFS.img upload failed after 3 attempts."
+          exit 1
+
+      - name: Upload RomFS as GitHub Artifact
+        if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.target == 'artifact'
         uses: actions/upload-artifact@v4
         with:
           name: NxNative-ROMFS
@@ -657,6 +763,33 @@ jobs:
 
           echo "IPA successfully created: $OUTPUT"
           ls -lh "$OUTPUT"
+
+      - name: Upload IPA to Baidu Netdisk
+        if: success() && steps.upload_mode.outputs.target == 'baidu'
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE="$RUNNER_TEMP/NxNative.ipa"
+          [[ -s "$FILE" ]] || { echo "::error::IPA is missing."; exit 1; }
+
+          for attempt in 1 2 3; do
+            echo "Baidu IPA upload attempt $attempt/3"
+            if "$BAIDUPCS_BIN" upload "$FILE" "$BAIDU_REMOTE_DIR" --norapid --policy overwrite; then
+              echo "Upload command completed; checking remote directory."
+              if "$BAIDUPCS_BIN" ls "$BAIDU_REMOTE_DIR"; then
+                echo "IPA upload command and remote listing completed."
+                exit 0
+              fi
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              echo "IPA upload/verification failed; retrying in $((attempt * 15)) seconds."
+              sleep $((attempt * 15))
+            fi
+          done
+
+          echo "::error::IPA upload failed after 3 attempts."
+          exit 1
+
       - name: Audit Disk After Build
         if: always()
         shell: bash
@@ -680,7 +813,7 @@ jobs:
               du -h -d 1 "$DIR" 2>/dev/null | sort -h
             fi
           done
-          
+
       - name: Stop disk monitor and print report
         if: always()
         shell: bash
@@ -690,9 +823,9 @@ jobs:
           NX_MONITOR_LOG: ${{ runner.temp }}/disk-monitor.log
         run: |
           python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/nxnative_ci_guard.py" stop
-          
-      - name: Upload IPA
-        if: success()
+
+      - name: Upload IPA as GitHub Artifact
+        if: success() && steps.upload_mode.outputs.target == 'artifact'
         uses: actions/upload-artifact@v4
         with:
           name: NxNative-IPA-${{ inputs.device == 'iPhone 15 or older (BC fallback)' && 'BC-Fallback' || 'Standard' }}
@@ -719,4 +852,6 @@ jobs:
         run: |
           rm -rf \
             "$RUNNER_TEMP/nxnative" \
-            "$RUNNER_TEMP/GameFiles"
+            "$RUNNER_TEMP/GameFiles" \
+            "$RUNNER_TEMP/baidupcs" \
+            "$RUNNER_TEMP/baidupcs-config"
