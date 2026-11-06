@@ -1,0 +1,137 @@
+name: Download Files from Baidu Netdisk
+
+on:
+  workflow_dispatch:
+    inputs:
+      remote_paths:
+        description: "百度网盘路径；每个文件/目录一项。网页输入框请用 \n 分隔多项，例如 /folder/a.zip\n/folder/b.bin"
+        required: true
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  download:
+    name: Download selected Baidu Netdisk files
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Validate inputs and credentials
+        shell: bash
+        env:
+          REMOTE_PATHS: ${{ inputs.remote_paths }}
+          BDUSS: ${{ secrets.BDUSS }}
+          STOKEN: ${{ secrets.STOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${REMOTE_PATHS//[[:space:]]/}" ]]; then
+            echo "::error::No Baidu Netdisk paths were provided."
+            exit 1
+          fi
+
+          if [[ -z "${BDUSS:-}" || -z "${STOKEN:-}" ]]; then
+            echo "::error::Missing repository secrets BDUSS or STOKEN."
+            exit 1
+          fi
+
+      - name: Install BaiduPCS-Go
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="v4.0.2"
+          ARCHIVE="$RUNNER_TEMP/BaiduPCS-Go-$VERSION-linux-amd64.zip"
+          EXTRACT_DIR="$RUNNER_TEMP/baidupcs-extract"
+
+          mkdir -p "$EXTRACT_DIR" "$GITHUB_WORKSPACE/baidu-downloads"
+          curl -fL --retry 3 --retry-delay 3 \
+            "https://github.com/qjfoidnh/BaiduPCS-Go/releases/download/$VERSION/BaiduPCS-Go-$VERSION-linux-amd64.zip" \
+            -o "$ARCHIVE"
+          unzip -q "$ARCHIVE" -d "$EXTRACT_DIR"
+
+          BIN="$(find "$EXTRACT_DIR" -type f -name 'BaiduPCS-Go' -print -quit)"
+          if [[ -z "$BIN" ]]; then
+            echo "::error::BaiduPCS-Go executable was not found in the release archive."
+            exit 1
+          fi
+
+          install -m 755 "$BIN" "$RUNNER_TEMP/BaiduPCS-Go"
+          echo "BAIDUPCS_BIN=$RUNNER_TEMP/BaiduPCS-Go" >> "$GITHUB_ENV"
+
+      - name: Login to Baidu Netdisk
+        shell: bash
+        env:
+          BDUSS: ${{ secrets.BDUSS }}
+          STOKEN: ${{ secrets.STOKEN }}
+        run: |
+          set -euo pipefail
+          "$BAIDUPCS_BIN" login "-bduss=$BDUSS" "-stoken=$STOKEN"
+          "$BAIDUPCS_BIN" who
+
+      - name: Download requested files
+        shell: bash
+        env:
+          REMOTE_PATHS: ${{ inputs.remote_paths }}
+        run: |
+          set -euo pipefail
+
+          # GitHub's workflow_dispatch string field is single-line.
+          # Accept literal \\n, %0A, or actual newline separators (for API/CLI dispatch).
+          NORMALIZED_PATHS="$(
+            printf '%s' "$REMOTE_PATHS" |
+              sed -e 's/%0D//gI' -e 's/%0A/\n/gI' -e 's/\\n/\n/g'
+          )"
+
+          mapfile -t PATHS < <(printf '%s\n' "$NORMALIZED_PATHS" | tr -d '\r')
+
+          CLEAN_PATHS=()
+          for path in "${PATHS[@]}"; do
+            # Trim leading/trailing whitespace and ignore blank lines.
+            path="$(printf '%s' "$path" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+            [[ -z "$path" ]] && continue
+            CLEAN_PATHS+=("$path")
+          done
+
+          if [[ "${#CLEAN_PATHS[@]}" -eq 0 ]]; then
+            echo "::error::No valid remote paths remain after parsing the input."
+            exit 1
+          fi
+
+          echo "Requested download items: ${#CLEAN_PATHS[@]}"
+          for path in "${CLEAN_PATHS[@]}"; do
+            echo "Downloading: $path"
+            "$BAIDUPCS_BIN" download "$path" \
+              --saveto "$GITHUB_WORKSPACE/baidu-downloads" \
+              --ow \
+              -p 1 \
+              --retry 5
+          done
+
+          if ! find "$GITHUB_WORKSPACE/baidu-downloads" -type f -print -quit | grep -q .; then
+            echo "::error::Download completed but no local files were found."
+            exit 1
+          fi
+
+          echo "===== Downloaded files ====="
+          find "$GITHUB_WORKSPACE/baidu-downloads" -type f -printf '%P (%s bytes)\n' | sort
+
+      - name: Upload downloaded files as GitHub Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Baidu-Netdisk-Downloads-${{ github.run_number }}-${{ github.run_attempt }}
+          path: baidu-downloads/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Clean up BaiduPCS-Go credentials and temporary files
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/BaiduPCS-Go" \
+                 "$RUNNER_TEMP/baidupcs-extract" \
+                 "$RUNNER_TEMP/BaiduPCS-Go-v4.0.2-linux-amd64.zip"
