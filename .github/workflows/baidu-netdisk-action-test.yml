@@ -1,0 +1,67 @@
+name: Test Baidu Netdisk Upload Action
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upload-probe:
+    name: Upload a 1 MiB probe file
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check Baidu credentials are configured
+        shell: bash
+        env:
+          BDUSS: ${{ secrets.BDUSS }}
+          STOKEN: ${{ secrets.STOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${BDUSS:-}" ]]; then
+            echo "::error::Repository secret BDUSS is missing."
+            exit 1
+          fi
+          if [[ -z "${STOKEN:-}" ]]; then
+            echo "::error::Repository secret STOKEN is missing."
+            exit 1
+          fi
+          echo "Both required Baidu credentials are present."
+
+      - name: Generate a unique 1 MiB test file
+        id: probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE="$RUNNER_TEMP/baidu-action-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.bin"
+          dd if=/dev/urandom of="$FILE" bs=1M count=1 status=none
+          test "$(stat -c '%s' "$FILE")" -eq 1048576
+          echo "path=$FILE" >> "$GITHUB_OUTPUT"
+          echo "filename=$(basename "$FILE")" >> "$GITHUB_OUTPUT"
+          echo "Generated 1 MiB upload probe: $(basename "$FILE")"
+
+      - name: Upload probe with CHC383 Baidu Netdisk Action
+        uses: CHC383/baidu-netdisk-upload-action@38c6fdcb66d4ca398467264db5532947d12ff113
+        with:
+          bduss: ${{ secrets.BDUSS }}
+          stoken: ${{ secrets.STOKEN }}
+          target: ${{ steps.probe.outputs.path }}
+          remote-dir: /
+          upload-policy: skip
+
+      - name: Report uploaded test file
+        shell: bash
+        env:
+          PROBE_NAME: ${{ steps.probe.outputs.filename }}
+        run: |
+          {
+            echo "## Baidu Netdisk Action test"
+            echo
+            echo "The Action completed successfully for a 1 MiB test file."
+            echo
+            echo "Remote path: `/$PROBE_NAME`"
+            echo
+            echo "The test file is intentionally left in the Netdisk root for manual verification."
+          } >> "$GITHUB_STEP_SUMMARY"
