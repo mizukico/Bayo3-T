@@ -153,8 +153,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TEST_FILE="$RUNNER_TEMP/baidu-upload-probe.bin"
-          REMOTE_PATH="/.__nxnative_upload_probe_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.bin"
+          TEST_NAME=".__nxnative_upload_probe_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.bin"
+          TEST_FILE="$RUNNER_TEMP/$TEST_NAME"
+          REMOTE_PATH="/$TEST_NAME"
           trap '"$BAIDUPCS_BIN" rm "$REMOTE_PATH" >/dev/null 2>&1 || true; rm -f "$TEST_FILE"' EXIT
 
           # 1 MiB of random data prevents a hash-only/empty-file check and exercises data transfer.
