@@ -15,7 +15,7 @@ on:
         description: "Base game title ID (manual override; clear for automatic detection)"
         required: false
         type: string
-        default: "0100B8A026F14000"
+        default: "01004A4010FEA000"
       upload_target:
         description: "Choose where to upload build outputs"
         required: true
