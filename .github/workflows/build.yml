@@ -16,8 +16,16 @@ on:
         required: false
         type: string
         default: ""
-      upload_target:
-        description: "Choose where to upload build outputs"
+      img_upload_target:
+        description: "RomFS.img upload destination"
+        required: true
+        type: choice
+        default: "artifact"
+        options:
+          - "artifact"
+          - "baidu"
+      ipa_upload_target:
+        description: "IPA upload destination"
         required: true
         type: choice
         default: "artifact"
@@ -63,23 +71,33 @@ jobs:
         id: upload_mode
         shell: bash
         env:
-          REQUESTED_UPLOAD_TARGET: ${{ inputs.upload_target }}
+          REQUESTED_IMG_TARGET: ${{ inputs.img_upload_target }}
+          REQUESTED_IPA_TARGET: ${{ inputs.ipa_upload_target }}
           BDUSS: ${{ secrets.BDUSS }}
           STOKEN: ${{ secrets.STOKEN }}
         run: |
           set -euo pipefail
-          TARGET="$REQUESTED_UPLOAD_TARGET"
+          IMG_TARGET="$REQUESTED_IMG_TARGET"
+          IPA_TARGET="$REQUESTED_IPA_TARGET"
 
-          if [[ "$TARGET" == "baidu" && ( -z "${BDUSS:-}" || -z "${STOKEN:-}" ) ]]; then
-            echo "::warning::BDUSS or STOKEN is not configured; falling back to GitHub Artifact."
-            TARGET="artifact"
+          if [[ -z "${BDUSS:-}" || -z "${STOKEN:-}" ]]; then
+            if [[ "$IMG_TARGET" == "baidu" ]]; then
+              echo "::warning::Baidu credentials are missing; RomFS upload will use GitHub Artifact."
+              IMG_TARGET="artifact"
+            fi
+            if [[ "$IPA_TARGET" == "baidu" ]]; then
+              echo "::warning::Baidu credentials are missing; IPA upload will use GitHub Artifact."
+              IPA_TARGET="artifact"
+            fi
           fi
 
-          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
-          echo "Effective upload target: $TARGET"
+          echo "img_target=$IMG_TARGET" >> "$GITHUB_OUTPUT"
+          echo "ipa_target=$IPA_TARGET" >> "$GITHUB_OUTPUT"
+          echo "Effective RomFS upload target: $IMG_TARGET"
+          echo "Effective IPA upload target: $IPA_TARGET"
 
       - name: Install BaiduPCS-Go and create a unique remote build folder
-        if: steps.upload_mode.outputs.target == 'baidu'
+        if: steps.upload_mode.outputs.img_target == 'baidu' || steps.upload_mode.outputs.ipa_target == 'baidu'
         shell: bash
         env:
           BDUSS: ${{ secrets.BDUSS }}
@@ -644,7 +662,10 @@ jobs:
           fi
 
       - name: Upload RomFS to Baidu Netdisk before Metal
-        if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.target == 'baidu'
+        id: upload_romfs_baidu
+        if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.img_target == 'baidu'
+        timeout-minutes: 60
+        continue-on-error: true
         uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
         with:
           bduss: ${{ secrets.BDUSS }}
@@ -654,7 +675,7 @@ jobs:
           upload-policy: overwrite
           
       - name: Upload RomFS as GitHub Artifact
-        if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.target == 'artifact'
+        if: success() && steps.prepare.outputs.romfs_ready == 'true' && (steps.upload_mode.outputs.img_target == 'artifact' || steps.upload_romfs_baidu.outcome == 'failure')
         uses: actions/upload-artifact@v4
         with:
           name: NxNative-ROMFS
@@ -716,7 +737,10 @@ jobs:
           ls -lh "$OUTPUT"
 
       - name: Upload IPA to Baidu Netdisk
-        if: success() && steps.upload_mode.outputs.target == 'baidu'
+        id: upload_ipa_baidu
+        if: success() && steps.upload_mode.outputs.ipa_target == 'baidu'
+        timeout-minutes: 60
+        continue-on-error: true
         uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
         with:
           bduss: ${{ secrets.BDUSS }}
@@ -760,7 +784,7 @@ jobs:
           python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/nxnative_ci_guard.py" stop
 
       - name: Upload IPA as GitHub Artifact
-        if: success() && steps.upload_mode.outputs.target == 'artifact'
+        if: success() && (steps.upload_mode.outputs.ipa_target == 'artifact' || steps.upload_ipa_baidu.outcome == 'failure')
         uses: actions/upload-artifact@v4
         with:
           name: NxNative-IPA-${{ inputs.device == 'iPhone 15 or older (BC fallback)' && 'BC-Fallback' || 'Standard' }}
