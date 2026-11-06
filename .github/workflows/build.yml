@@ -87,6 +87,86 @@ jobs:
           set -euo pipefail
           python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/nxnative_ci_guard.py" preclean "$RUNNER_TEMP"
 
+      # Resolve upload destination and validate Baidu upload before downloading game files.
+      # If the Secret is absent, keep the normal GitHub Artifact path.
+      - name: Select upload destination
+        id: upload_mode
+        shell: bash
+        env:
+          REQUESTED_UPLOAD_TARGET: ${{ inputs.upload_target }}
+          BAIDU_COOKIES: ${{ secrets.BAIDU_COOKIES }}
+        run: |
+          set -euo pipefail
+          TARGET="$REQUESTED_UPLOAD_TARGET"
+
+          if [[ "$TARGET" == "baidu" && -z "${BAIDU_COOKIES:-}" ]]; then
+            echo "::warning::BAIDU_COOKIES is not configured; falling back to GitHub Artifact."
+            TARGET="artifact"
+          fi
+
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "Effective upload target: $TARGET"
+
+      - name: Set up Go for patched BaiduPCS-Go
+        if: steps.upload_mode.outputs.target == 'baidu'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+
+      - name: Install and login to BaiduPCS-Go v4.0.2
+        if: steps.upload_mode.outputs.target == 'baidu'
+        shell: bash
+        env:
+          BAIDU_COOKIES: ${{ secrets.BAIDU_COOKIES }}
+        run: |
+          set -euo pipefail
+
+          BAIDU_DIR="$RUNNER_TEMP/baidupcs"
+          BAIDU_SOURCE="$RUNNER_TEMP/BaiduPCS-Go"
+          BAIDU_CONFIG="$RUNNER_TEMP/baidupcs-config"
+          mkdir -p "$BAIDU_DIR" "$BAIDU_CONFIG"
+
+          git clone --depth 1 --branch v4.0.2 https://github.com/qjfoidnh/BaiduPCS-Go.git "$BAIDU_SOURCE"
+          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/patch_baidupcs.py" "$BAIDU_SOURCE"
+
+          if [[ "$(uname -m)" == "arm64" ]]; then
+            ARCH="arm64"
+          else
+            ARCH="amd64"
+          fi
+
+          BIN="$BAIDU_DIR/BaiduPCS-Go"
+          (cd "$BAIDU_SOURCE" && CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" go build -trimpath -ldflags="-s -w" -o "$BIN" .)
+          chmod +x "$BIN"
+
+          echo "BAIDUPCS_BIN=$BIN" >> "$GITHUB_ENV"
+          echo "BAIDUPCS_GO_CONFIG_DIR=$BAIDU_CONFIG" >> "$GITHUB_ENV"
+
+          "$BIN" login -cookies="$BAIDU_COOKIES"
+          "$BIN" who
+
+          echo "===== Verify Baidu Netdisk API access ====="
+          "$BIN" ls /
+
+      - name: Test Baidu upload before downloading game files
+        if: steps.upload_mode.outputs.target == 'baidu'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEST_FILE="$RUNNER_TEMP/baidu-upload-probe.bin"
+          REMOTE_PATH="/.__nxnative_upload_probe_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.bin"
+          trap '"$BAIDUPCS_BIN" rm "$REMOTE_PATH" >/dev/null 2>&1 || true; rm -f "$TEST_FILE"' EXIT
+
+          # Use non-empty random content so this exercises an actual upload, not a directory listing.
+          dd if=/dev/urandom of="$TEST_FILE" bs=1024 count=64
+          echo "===== Baidu upload preflight: 64 KiB test file ====="
+          ls -lh "$TEST_FILE"
+
+          "$BAIDUPCS_BIN" upload "$TEST_FILE" / --norapid --policy overwrite
+          echo "===== Verify uploaded test file ====="
+          "$BAIDUPCS_BIN" ls "$REMOTE_PATH"
+          echo "Baidu upload preflight passed; game downloads may proceed."
+
       # ==========================================
       # Xcode 组件磁盘占用盘点
       # ==========================================
@@ -559,67 +639,6 @@ jobs:
             exit 1
           fi
           python "$CHAIN_SCRIPT" --header
-
-      # Resolve the upload destination only after DM_GAME has been detected.
-      # If the Secret is absent, keep the normal GitHub Artifact path.
-      - name: Select upload destination
-        id: upload_mode
-        shell: bash
-        env:
-          REQUESTED_UPLOAD_TARGET: ${{ inputs.upload_target }}
-          BAIDU_COOKIES: ${{ secrets.BAIDU_COOKIES }}
-        run: |
-          set -euo pipefail
-          TARGET="$REQUESTED_UPLOAD_TARGET"
-
-          if [[ "$TARGET" == "baidu" && -z "${BAIDU_COOKIES:-}" ]]; then
-            echo "::warning::BAIDU_COOKIES is not configured; falling back to GitHub Artifact."
-            TARGET="artifact"
-          fi
-
-          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
-          echo "Effective upload target: $TARGET"
-
-      - name: Set up Go for patched BaiduPCS-Go
-        if: steps.upload_mode.outputs.target == 'baidu'
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.23.x"
-
-      - name: Install and login to BaiduPCS-Go v4.0.2
-        if: steps.upload_mode.outputs.target == 'baidu'
-        shell: bash
-        env:
-          BAIDU_COOKIES: ${{ secrets.BAIDU_COOKIES }}
-        run: |
-          set -euo pipefail
-
-          BAIDU_DIR="$RUNNER_TEMP/baidupcs"
-          BAIDU_SOURCE="$RUNNER_TEMP/BaiduPCS-Go"
-          BAIDU_CONFIG="$RUNNER_TEMP/baidupcs-config"
-          mkdir -p "$BAIDU_DIR" "$BAIDU_CONFIG"
-
-          git clone --depth 1 --branch v4.0.2 https://github.com/qjfoidnh/BaiduPCS-Go.git "$BAIDU_SOURCE"
-          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/patch_baidupcs.py" "$BAIDU_SOURCE"
-
-          if [[ "$(uname -m)" == "arm64" ]]; then
-            ARCH="arm64"
-          else
-            ARCH="amd64"
-          fi
-
-          BIN="$BAIDU_DIR/BaiduPCS-Go"
-          (cd "$BAIDU_SOURCE" && CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" go build -trimpath -ldflags="-s -w" -o "$BIN" .)
-          chmod +x "$BIN"
-
-          echo "BAIDUPCS_BIN=$BIN" >> "$GITHUB_ENV"
-          echo "BAIDUPCS_GO_CONFIG_DIR=$BAIDU_CONFIG" >> "$GITHUB_ENV"
-
-          "$BIN" login -cookies="$BAIDU_COOKIES"
-          "$BIN" who
-
-          echo "===== Verify Baidu Netdisk API access ====="
-          "$BIN" ls /
 
       # ===== First pass: extract, rewrite and split shaders; stop before Metal =====
       - name: Prepare shader split and RomFS for upload
