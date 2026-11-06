@@ -195,8 +195,7 @@ The CI helper validates expected upstream code anchors before patching. If upstr
 
 ---
 
-<details>
-<summary>简体中文（点击展开）</summary>
+## 简体中文
 
 # NxNative – 通用 iOS IPA 构建器
 
@@ -391,4 +390,3 @@ RomFS Artifact 是有条件生成的，并非每个游戏或构建路径都会�
 
 CI 辅助脚本在修改上游文件前会验证预期代码锚点。如果上游代码结构发生变化，工作流可能在补丁阶段停止。这是有意设计的保护机制，避免将补丁静默应用到不匹配的源码版本。
 
-</details>
