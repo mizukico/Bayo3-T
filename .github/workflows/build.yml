@@ -94,59 +94,63 @@ jobs:
         shell: bash
         env:
           REQUESTED_UPLOAD_TARGET: ${{ inputs.upload_target }}
-          BAIDU_COOKIES: ${{ secrets.BAIDU_COOKIES }}
+          BDUSS: ${{ secrets.BDUSS }}
+          STOKEN: ${{ secrets.STOKEN }}
         run: |
           set -euo pipefail
           TARGET="$REQUESTED_UPLOAD_TARGET"
 
-          if [[ "$TARGET" == "baidu" && -z "${BAIDU_COOKIES:-}" ]]; then
-            echo "::warning::BAIDU_COOKIES is not configured; falling back to GitHub Artifact."
+          if [[ "$TARGET" == "baidu" && ( -z "${BDUSS:-}" || -z "${STOKEN:-}" ) ]]; then
+            echo "::warning::BDUSS or STOKEN is not configured; falling back to GitHub Artifact."
             TARGET="artifact"
           fi
 
           echo "target=$TARGET" >> "$GITHUB_OUTPUT"
           echo "Effective upload target: $TARGET"
 
-      - name: Set up Go for patched BaiduPCS-Go
-        if: steps.upload_mode.outputs.target == 'baidu'
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.23.x"
-
-      - name: Install and login to BaiduPCS-Go v4.0.2
+      - name: Install BaiduPCS-Go and create a unique remote build folder
         if: steps.upload_mode.outputs.target == 'baidu'
         shell: bash
         env:
-          BAIDU_COOKIES: ${{ secrets.BAIDU_COOKIES }}
+          BDUSS: ${{ secrets.BDUSS }}
+          STOKEN: ${{ secrets.STOKEN }}
         run: |
           set -euo pipefail
 
           BAIDU_DIR="$RUNNER_TEMP/baidupcs"
-          BAIDU_SOURCE="$RUNNER_TEMP/BaiduPCS-Go"
+          BAIDU_EXTRACT="$RUNNER_TEMP/baidupcs-extract"
           BAIDU_CONFIG="$RUNNER_TEMP/baidupcs-config"
-          mkdir -p "$BAIDU_DIR" "$BAIDU_CONFIG"
+          mkdir -p "$BAIDU_DIR" "$BAIDU_EXTRACT" "$BAIDU_CONFIG"
 
-          git clone --depth 1 --branch v4.0.2 https://github.com/qjfoidnh/BaiduPCS-Go.git "$BAIDU_SOURCE"
-          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/patch_baidupcs.py" "$BAIDU_SOURCE"
+          case "$(uname -m)" in
+            arm64|aarch64) ARCH="arm64" ;;
+            x86_64|amd64) ARCH="amd64" ;;
+            *)
+              echo "::error::Unsupported macOS runner architecture: $(uname -m)"
+              exit 1
+              ;;
+          esac
 
-          if [[ "$(uname -m)" == "arm64" ]]; then
-            ARCH="arm64"
-          else
-            ARCH="amd64"
-          fi
+          VERSION="v4.0.2"
+          ARCHIVE="$RUNNER_TEMP/BaiduPCS-Go-$VERSION-darwin-osx-$ARCH.zip"
+          curl -fsSL "https://github.com/qjfoidnh/BaiduPCS-Go/releases/download/$VERSION/BaiduPCS-Go-$VERSION-darwin-osx-$ARCH.zip" -o "$ARCHIVE"
+          unzip -q "$ARCHIVE" -d "$BAIDU_EXTRACT"
+          BIN="$(find "$BAIDU_EXTRACT" -type f -name 'BaiduPCS-Go' -print -quit)"
+          test -n "$BIN"
+          install -m 755 "$BIN" "$BAIDU_DIR/BaiduPCS-Go"
 
-          BIN="$BAIDU_DIR/BaiduPCS-Go"
-          (cd "$BAIDU_SOURCE" && CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" go build -trimpath -ldflags="-s -w" -o "$BIN" .)
-          chmod +x "$BIN"
-
-          echo "BAIDUPCS_BIN=$BIN" >> "$GITHUB_ENV"
+          BAIDU_BIN="$BAIDU_DIR/BaiduPCS-Go"
+          echo "BAIDUPCS_BIN=$BAIDU_BIN" >> "$GITHUB_ENV"
           echo "BAIDUPCS_GO_CONFIG_DIR=$BAIDU_CONFIG" >> "$GITHUB_ENV"
 
-          "$BIN" login -cookies="$BAIDU_COOKIES"
-          "$BIN" who
+          "$BAIDU_BIN" login "-bduss=$BDUSS" "-stoken=$STOKEN"
+          "$BAIDU_BIN" who
+          "$BAIDU_BIN" ls /
 
-          echo "===== Verify Baidu Netdisk API access ====="
-          "$BIN" ls /
+          REMOTE_DIR="/NxNative-Build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          "$BAIDU_BIN" mkdir "$REMOTE_DIR"
+          echo "BAIDU_REMOTE_DIR=$REMOTE_DIR" >> "$GITHUB_ENV"
+          echo "Created unique Baidu Netdisk build folder: $REMOTE_DIR"
 
       - name: Test Baidu upload before downloading game files
         if: steps.upload_mode.outputs.target == 'baidu'
@@ -155,15 +159,14 @@ jobs:
           set -euo pipefail
           TEST_NAME="NxNative-upload-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.bin"
           TEST_FILE="$RUNNER_TEMP/$TEST_NAME"
-          REMOTE_PATH="/$TEST_NAME"
+          REMOTE_PATH="$BAIDU_REMOTE_DIR/$TEST_NAME"
           trap '"$BAIDUPCS_BIN" rm "$REMOTE_PATH" >/dev/null 2>&1 || true; rm -f "$TEST_FILE"' EXIT
 
-          # 1 MiB of random data prevents a hash-only/empty-file check and exercises data transfer.
           dd if=/dev/urandom of="$TEST_FILE" bs=1024 count=1024
           echo "===== Baidu upload preflight: 1 MiB test file ====="
           ls -lh "$TEST_FILE"
 
-          "$BAIDUPCS_BIN" upload "$TEST_FILE" / --norapid --policy overwrite
+          "$BAIDUPCS_BIN" upload "$TEST_FILE" "$BAIDU_REMOTE_DIR" --norapid --policy overwrite
           echo "===== Verify uploaded test file ====="
           "$BAIDUPCS_BIN" ls "$REMOTE_PATH"
           echo "===== Remove test file from Baidu Netdisk ====="
@@ -174,7 +177,7 @@ jobs:
           fi
           rm -f "$TEST_FILE"
           trap - EXIT
-          echo "Baidu upload, remote verification, and cleanup all passed; game downloads may proceed."
+          echo "Baidu login, unique-folder creation, upload, remote verification, and cleanup passed."
 
       # ==========================================
       # Xcode 组件磁盘占用盘点
@@ -701,32 +704,13 @@ jobs:
 
       - name: Upload RomFS to Baidu Netdisk before Metal
         if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.target == 'baidu'
-        shell: bash
-        run: |
-          set -euo pipefail
-          FILE="$RUNNER_TEMP/romfs-handoff/RomFS.img"
-          [[ -s "$FILE" ]] || { echo "::error::RomFS.img is missing."; exit 1; }
-
-          echo "Uploading RomFS.img to Baidu Netdisk root directory."
-
-          for attempt in 1 2 3; do
-            echo "Baidu RomFS upload attempt $attempt/3"
-            if "$BAIDUPCS_BIN" upload "$FILE" / --norapid --policy overwrite; then
-              echo "Upload command completed; checking remote root directory."
-              if "$BAIDUPCS_BIN" ls /; then
-                echo "RomFS upload command and remote listing completed."
-                exit 0
-              fi
-            fi
-
-            if [[ "$attempt" -lt 3 ]]; then
-              echo "RomFS upload/verification failed; retrying in $((attempt * 15)) seconds."
-              sleep $((attempt * 15))
-            fi
-          done
-
-          echo "::error::RomFS.img upload failed after 3 attempts."
-          exit 1
+        uses: CHC383/baidu-netdisk-upload-action@38c6fdcb66d4ca398467264db5532947d12ff113
+        with:
+          bduss: ${{ secrets.BDUSS }}
+          stoken: ${{ secrets.STOKEN }}
+          target: ${{ runner.temp }}/romfs-handoff/RomFS.img
+          remote-dir: ${{ env.BAIDU_REMOTE_DIR }}
+          upload-policy: overwrite
           
       - name: Upload RomFS as GitHub Artifact
         if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.target == 'artifact'
@@ -792,29 +776,13 @@ jobs:
 
       - name: Upload IPA to Baidu Netdisk
         if: success() && steps.upload_mode.outputs.target == 'baidu'
-        shell: bash
-        run: |
-          set -euo pipefail
-          FILE="$RUNNER_TEMP/NxNative.ipa"
-          [[ -s "$FILE" ]] || { echo "::error::IPA is missing."; exit 1; }
-
-          for attempt in 1 2 3; do
-            echo "Baidu IPA upload attempt $attempt/3"
-            if "$BAIDUPCS_BIN" upload "$FILE" / --norapid --policy overwrite; then
-              echo "Upload command completed; checking remote root directory."
-              if "$BAIDUPCS_BIN" ls /; then
-                echo "IPA upload command and remote listing completed."
-                exit 0
-              fi
-            fi
-            if [[ "$attempt" -lt 3 ]]; then
-              echo "IPA upload/verification failed; retrying in $((attempt * 15)) seconds."
-              sleep $((attempt * 15))
-            fi
-          done
-
-          echo "::error::IPA upload failed after 3 attempts."
-          exit 1
+        uses: CHC383/baidu-netdisk-upload-action@38c6fdcb66d4ca398467264db5532947d12ff113
+        with:
+          bduss: ${{ secrets.BDUSS }}
+          stoken: ${{ secrets.STOKEN }}
+          target: ${{ runner.temp }}/NxNative.ipa
+          remote-dir: ${{ env.BAIDU_REMOTE_DIR }}
+          upload-policy: overwrite
 
       - name: Audit Disk After Build
         if: always()
