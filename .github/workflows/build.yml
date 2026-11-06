@@ -153,7 +153,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TEST_NAME=".__nxnative_upload_probe_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.bin"
+          TEST_NAME="NxNative-upload-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.bin"
           TEST_FILE="$RUNNER_TEMP/$TEST_NAME"
           REMOTE_PATH="/$TEST_NAME"
           trap '"$BAIDUPCS_BIN" rm "$REMOTE_PATH" >/dev/null 2>&1 || true; rm -f "$TEST_FILE"' EXIT
