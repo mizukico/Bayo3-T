@@ -8,9 +8,9 @@ permissions:
 
 jobs:
   upload-probe:
-    name: Upload a 10 MiB probe file
+    name: Upload a 4000 MiB (over 4 GB) probe file
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 360
 
     steps:
       - name: Check Baidu credentials are configured
@@ -30,17 +30,24 @@ jobs:
           fi
           echo "Both required Baidu credentials are present."
 
-      - name: Generate a unique 10 MiB test file
+      - name: Check runner disk space and generate a unique 4000 MiB test file
         id: probe
         shell: bash
         run: |
           set -euo pipefail
           FILE="$RUNNER_TEMP/baidu-action-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.bin"
-          dd if=/dev/urandom of="$FILE" bs=1M count=10 status=none
-          test "$(stat -c '%s' "$FILE")" -eq 10485760
+          REQUIRED_BYTES=$((4000 * 1024 * 1024))
+          AVAILABLE_BYTES=$(df -B1 --output=avail "$RUNNER_TEMP" | tail -n 1 | tr -d ' ')
+          echo "Runner temp free space: $((AVAILABLE_BYTES / 1024 / 1024)) MiB"
+          if (( AVAILABLE_BYTES < REQUIRED_BYTES + 2 * 1024 * 1024 * 1024 )); then
+            echo "::error::Insufficient runner disk space for a 4000 MiB test file plus 2 GiB reserve."
+            exit 1
+          fi
+          dd if=/dev/urandom of="$FILE" bs=1M count=4000 status=progress
+          test "$(stat -c '%s' "$FILE")" -eq "$REQUIRED_BYTES"
           echo "path=$FILE" >> "$GITHUB_OUTPUT"
           echo "filename=$(basename "$FILE")" >> "$GITHUB_OUTPUT"
-          echo "Generated 10 MiB upload probe: $(basename "$FILE")"
+          echo "Generated 4000 MiB upload probe: $(basename "$FILE")"
 
       - name: Create a unique remote test folder
         shell: bash
@@ -84,7 +91,7 @@ jobs:
           {
             echo "## Baidu Netdisk Action test"
             echo
-            echo "The Action completed successfully for a 10 MiB test file."
+            echo "The Action completed successfully for a 4000 MiB (4.19 GB) test file."
             echo
             printf 'Remote path: %s/%s\n' "$REMOTE_DIR" "$PROBE_NAME"
             echo
