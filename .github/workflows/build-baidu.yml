@@ -17,7 +17,7 @@ on:
         type: string
         default: ""
       game_path:
-        description: "百度网盘中的基础游戏文件路径（单个文件，NSP/XCI/NSZ/XCZ 或 RAR）"
+        description: "百度网盘中的游戏目录；递归下载目录内所有 NSP/XCI 文件"
         required: true
         type: string
       keys_path:
@@ -264,7 +264,37 @@ jobs:
             echo "Downloaded $label: $(basename "$output") ($(stat -f%z "$output") bytes)"
           }
 
-          download_baidu_file "$GAME_PATH" "$WORK/game.download" "game"
+          # Download the game directory recursively and select all NSP/XCI files.
+          if [[ -z "${GAME_PATH:-}" ]]; then
+            echo "::error::The Baidu Netdisk game directory is required."
+            exit 1
+          fi
+
+          GAME_STAGE="$DOWNLOAD_ROOT/game-directory"
+          mkdir -p "$GAME_STAGE"
+          echo "Downloading game directory recursively: $GAME_PATH"
+          "$BAIDUPCS_BIN" download "$GAME_PATH" \
+            --saveto "$GAME_STAGE" --ow -p 1 --retry 5
+
+          GAME_PACKAGES="$WORK/game-downloads"
+          mkdir -p "$GAME_PACKAGES"
+          while IFS= read -r -d '' package; do
+            filename="$(basename "$package")"
+            if [[ -e "$GAME_PACKAGES/$filename" ]]; then
+              echo "::error::Duplicate package filename in game directory: $filename"
+              exit 1
+            fi
+            cp "$package" "$GAME_PACKAGES/$filename"
+            echo "Selected game package: $filename ($(stat -f%z "$package") bytes)"
+          done < <(find "$GAME_STAGE" -type f \\( -iname '*.nsp' -o -iname '*.xci' \\) -print0)
+
+          PACKAGE_COUNT="$(find "$GAME_PACKAGES" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          if [[ "$PACKAGE_COUNT" -eq 0 ]]; then
+            echo "::error::No NSP/XCI files were found in the specified Baidu Netdisk directory."
+            exit 1
+          fi
+          echo "Found $PACKAGE_COUNT NSP/XCI package(s)."
+
           download_baidu_file "$KEYS_PATH" "$WORK/prod.keys" "keys"
           download_baidu_file "$UPDATE_PATH" "$WORK/update.download" "update"
           download_baidu_file "$DLC_PATH" "$WORK/dlc.download" "dlc"
@@ -321,6 +351,21 @@ jobs:
                   f"({target.stat().st_size:,} bytes)"
               )
           def process_download(label):
+              if label == "game":
+                  source_dir = work / "game-downloads"
+                  if not source_dir.is_dir():
+                      raise SystemExit("Game package download directory is missing.")
+                  packages = sorted(
+                      p for p in source_dir.rglob("*")
+                      if p.is_file()
+                      and p.suffix.lower() in (".nsp", ".xci")
+                  )
+                  if not packages:
+                      raise SystemExit("No NSP/XCI packages were downloaded.")
+                  for package in packages:
+                      add_package(package, label)
+                  return
+
               source = work / f"{label}.download"
               if not source.exists():
                   print(f"No {label} download; skipping.")
