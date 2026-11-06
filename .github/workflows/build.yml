@@ -55,38 +55,6 @@ jobs:
           ref: ${{ github.ref }}
           path: workflow-tools
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Apply CI disk-safe shader and RomFS patches
-        shell: bash
-        run: |
-          set -euo pipefail
-          GUARD="$GITHUB_WORKSPACE/workflow-tools/.github/scripts/nxnative_ci_guard.py"
-          python "$GUARD" patch "$GITHUB_WORKSPACE"
-
-      - name: Set up .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "10.0.x"
-
-      - name: Install dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          brew install glslang xcodegen zstd spirv-cross unar
-          python -m pip install --upgrade pip
-          python -m pip install \
-            lz4 capstone fonttools backports.zstd gdown
-
-      - name: Remove stale NxNative temporary files
-        shell: bash
-        run: |
-          set -euo pipefail
-          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/nxnative_ci_guard.py" preclean "$RUNNER_TEMP"
-
       # Resolve upload destination and validate Baidu upload before downloading game files.
       # If the Secret is absent, keep the normal GitHub Artifact path.
       - name: Select upload destination
@@ -151,6 +119,60 @@ jobs:
           "$BAIDU_BIN" mkdir "$REMOTE_DIR"
           echo "BAIDU_REMOTE_DIR=$REMOTE_DIR" >> "$GITHUB_ENV"
           echo "Created unique Baidu Netdisk build folder: $REMOTE_DIR"
+
+      - name: Create a 1 MiB Baidu upload preflight file
+        id: baidu_preflight
+        if: steps.upload_mode.outputs.target == 'baidu'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEST_FILE="$RUNNER_TEMP/NxNative-baidu-preflight-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.bin"
+          dd if=/dev/urandom of="$TEST_FILE" bs=1048576 count=1
+          test "$(stat -f%z "$TEST_FILE")" -eq 1048576
+          echo "path=$TEST_FILE" >> "$GITHUB_OUTPUT"
+          echo "Preflight file generated: $(ls -lh "$TEST_FILE")"
+
+      - name: Verify Baidu upload with the production Action
+        if: steps.upload_mode.outputs.target == 'baidu'
+        uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
+        with:
+          bduss: ${{ secrets.BDUSS }}
+          stoken: ${{ secrets.STOKEN }}
+          target: ${{ steps.baidu_preflight.outputs.path }}
+          remote-dir: ${{ env.BAIDU_REMOTE_DIR }}
+          upload-policy: skip
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Apply CI disk-safe shader and RomFS patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          GUARD="$GITHUB_WORKSPACE/workflow-tools/.github/scripts/nxnative_ci_guard.py"
+          python "$GUARD" patch "$GITHUB_WORKSPACE"
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install glslang xcodegen zstd spirv-cross unar
+          python -m pip install --upgrade pip
+          python -m pip install \
+            lz4 capstone fonttools backports.zstd gdown
+
+      - name: Remove stale NxNative temporary files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/nxnative_ci_guard.py" preclean "$RUNNER_TEMP"
 
       # ==========================================
       # Xcode 组件磁盘占用盘点
