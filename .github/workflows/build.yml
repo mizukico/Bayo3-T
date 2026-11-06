@@ -152,33 +152,6 @@ jobs:
           echo "BAIDU_REMOTE_DIR=$REMOTE_DIR" >> "$GITHUB_ENV"
           echo "Created unique Baidu Netdisk build folder: $REMOTE_DIR"
 
-      - name: Test Baidu upload before downloading game files
-        if: steps.upload_mode.outputs.target == 'baidu'
-        shell: bash
-        run: |
-          set -euo pipefail
-          TEST_NAME="NxNative-upload-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.bin"
-          TEST_FILE="$RUNNER_TEMP/$TEST_NAME"
-          REMOTE_PATH="$BAIDU_REMOTE_DIR/$TEST_NAME"
-          trap '"$BAIDUPCS_BIN" rm "$REMOTE_PATH" >/dev/null 2>&1 || true; rm -f "$TEST_FILE"' EXIT
-
-          dd if=/dev/urandom of="$TEST_FILE" bs=1024 count=1024
-          echo "===== Baidu upload preflight: 1 MiB test file ====="
-          ls -lh "$TEST_FILE"
-
-          "$BAIDUPCS_BIN" upload "$TEST_FILE" "$BAIDU_REMOTE_DIR" --norapid --policy overwrite
-          echo "===== Verify uploaded test file ====="
-          "$BAIDUPCS_BIN" ls "$REMOTE_PATH"
-          echo "===== Remove test file from Baidu Netdisk ====="
-          "$BAIDUPCS_BIN" rm "$REMOTE_PATH"
-          if "$BAIDUPCS_BIN" ls "$REMOTE_PATH" >/dev/null 2>&1; then
-            echo "::error::Baidu test file still exists after cleanup."
-            exit 1
-          fi
-          rm -f "$TEST_FILE"
-          trap - EXIT
-          echo "Baidu login, unique-folder creation, upload, remote verification, and cleanup passed."
-
       # ==========================================
       # Xcode 组件磁盘占用盘点
       # ==========================================
@@ -704,7 +677,7 @@ jobs:
 
       - name: Upload RomFS to Baidu Netdisk before Metal
         if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.target == 'baidu'
-        uses: CHC383/baidu-netdisk-upload-action@38c6fdcb66d4ca398467264db5532947d12ff113
+        uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
         with:
           bduss: ${{ secrets.BDUSS }}
           stoken: ${{ secrets.STOKEN }}
@@ -776,7 +749,7 @@ jobs:
 
       - name: Upload IPA to Baidu Netdisk
         if: success() && steps.upload_mode.outputs.target == 'baidu'
-        uses: CHC383/baidu-netdisk-upload-action@38c6fdcb66d4ca398467264db5532947d12ff113
+        uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
         with:
           bduss: ${{ secrets.BDUSS }}
           stoken: ${{ secrets.STOKEN }}
