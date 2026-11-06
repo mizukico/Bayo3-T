@@ -442,17 +442,12 @@ jobs:
           PY
           test -s "$WORK/prod.keys"
 
-      - name: Inspect APFS Storage
+      - name: Check Available Disk Space After Game Preparation
         shell: bash
         run: |
-          echo "===== Disk Layout ====="
-          diskutil list
-          echo "===== APFS Containers and Volumes ====="
-          diskutil apfs list
-          echo "===== Root Volume Details ====="
-          diskutil info /
-          echo "===== Filesystem Usage ====="
+          echo "===== Available Disk Space ====="
           df -h /
+          df -k / | awk 'NR==2 {printf "Available: %.2f GiB\\n", $4/1024/1024}'
 
       - name: Clean Up Original Game Downloads
         shell: bash
