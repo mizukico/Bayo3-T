@@ -30,6 +30,8 @@ permissions:
 
 jobs:
   build:
+    # Only the repository owner may execute the build job.
+    if: github.actor == github.repository_owner
     runs-on: xcode-27
     timeout-minutes: 360
 
@@ -226,7 +228,7 @@ jobs:
           echo ""
           echo "========== Xcode Audit Complete =========="
 
-      - name: Free Disk Space - Remove Unneeded Xcode Components
+      - name: Clean Xcode DerivedData and Caches
         shell: bash
         continue-on-error: true
         run: |
@@ -234,15 +236,13 @@ jobs:
           echo "========== Disk Before Cleanup =========="
           df -h /
           echo ""
-          echo "========== Simulator Runtimes =========="
-          xcrun simctl runtime list -v
-          echo ""
-          echo "========== Remove Unneeded Runtimes =========="
-          # 获取当前已安装的 Runtime 标识符
-          xcrun simctl runtime list -v
-          # 删除非 iOS 模拟器运行环境
-          # 具体 UUID/Bundle ID 必须以当前 Runner 返回值为准
-          # 不直接删除 Cryptex 挂载目录
+          echo "========== Removable Directory Sizes (Before) =========="
+          for DIR in \
+            "$HOME/Library/Developer/Xcode/DerivedData" \
+            "$HOME/Library/Caches/com.apple.dt.Xcode" \
+            "$HOME/Library/Developer/CoreSimulator/Caches"; do
+            if [ -d "$DIR" ]; then du -sh "$DIR" 2>/dev/null || true; fi
+          done
           echo ""
           echo "========== Clean Xcode DerivedData =========="
           rm -rf "$HOME/Library/Developer/Xcode/DerivedData/"*
@@ -253,6 +253,15 @@ jobs:
           echo "========== Clean CoreSimulator Caches =========="
           rm -rf "$HOME/Library/Developer/CoreSimulator/Caches/"*
           echo ""
+          echo "========== Removable Directory Sizes (After) =========="
+          for DIR in \
+            "$HOME/Library/Developer/Xcode/DerivedData" \
+            "$HOME/Library/Caches/com.apple.dt.Xcode" \
+            "$HOME/Library/Developer/CoreSimulator/Caches"; do
+            if [ -d "$DIR" ]; then du -sh "$DIR" 2>/dev/null || true; fi
+          done
+          echo ""
+          echo "Xcode, SDKs and Metal compiler are intentionally retained."
           echo "========== Disk After Cleanup =========="
           df -h /
 
@@ -277,7 +286,7 @@ jobs:
             fi
             echo "Downloading $(basename "$output")..."
             for attempt in 1 2 3; do
-              if gdown --continue "$url" -O "$output" \
+              if gdown --continue "$url" -O "$output" >/dev/null 2>&1 \
                 && [[ -s "$output" ]]; then
                 file "$output"
                 return
@@ -350,7 +359,7 @@ jobs:
                       "Duplicate package filename: " + source.name
                   )
               validate_package(source)
-              shutil.copy2(source, target)
+              shutil.move(str(source), str(target))
               print(
                   f"Added {label}: {target.name} "
                   f"({target.stat().st_size:,} bytes)"
@@ -410,7 +419,7 @@ jobs:
                       raise SystemExit(
                           f"Output package already exists: {target.name}"
                       )
-                  shutil.copy2(source, target)
+                  shutil.move(str(source), str(target))
                   validate_package(target)
                   print(
                       f"Added direct package: {target.name} "
