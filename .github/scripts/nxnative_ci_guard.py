@@ -131,7 +131,8 @@ def patch_dmsh_build(repo: Path) -> bool:
     )
 
     if MARKER_DM in src:
-        say("[patch] dmsh_build.py already has the safe CAS-only patch")
+        ast.parse(src, filename=str(p))
+        say("[patch] dmsh_build.py already has the safe CAS-only patch (syntax valid)")
         return bool(removed_pre_fin or removed_per_shader)
 
     if LEGACY_MARKER_DM in src:
@@ -144,8 +145,8 @@ def patch_dmsh_build(repo: Path) -> bool:
     # complete physical line and capture its indentation; never match a
     # substring of the leading spaces (which would dedent the try body).
     anchor = re.compile(
-        r"(?m)^([ \\t]*)if result\\[1\\] == 'ok': "
-        r"publish_cache\\(key, digests\\[key\\], rule_fps\\[key\\], CODE_FP\\)$"
+        r"(?m)^([ \t]*)if result\[1\] == 'ok': "
+        r"publish_cache\(key, digests\[key\], rule_fps\[key\], CODE_FP\)$"
     )
     matches = list(anchor.finditer(src))
     if len(matches) != 1:
@@ -156,9 +157,9 @@ def patch_dmsh_build(repo: Path) -> bool:
 
     indent = matches[0].group(1)
     replacement = (
-        f"{indent}{MARKER_DM}\\n"
-        f"{indent}if result[1] == 'ok':\\n"
-        f"{indent}    if os.environ.get('DMSH_DISABLE_SHADER_CAS') != '1':\\n"
+        f"{indent}{MARKER_DM}\n"
+        f"{indent}if result[1] == 'ok':\n"
+        f"{indent}    if os.environ.get('DMSH_DISABLE_SHADER_CAS') != '1':\n"
         f"{indent}        publish_cache(key, digests[key], rule_fps[key], CODE_FP)"
     )
     src = anchor.sub(lambda _m: replacement, src, count=1)
