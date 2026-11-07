@@ -721,13 +721,63 @@ jobs:
             "${ARGS[@]}" \
             -o "$OUTPUT" 2>&1 | tee "$WORK/build-console.log"
 
+          # Some OpenGL/GLSL games complete the IPA during the first pass and
+          # do not enter the NVN shader-split handoff. With --romfs separate,
+          # NxNative still leaves RomFS.img in the extracted game directory.
+          # Recover that exact image from the build log so it is uploaded too.
+          if [[ ! -s "$RUNNER_TEMP/romfs-handoff/ready" || ! -s "$RUNNER_TEMP/romfs-handoff/RomFS.img" ]]; then
+            IMAGE_PATH="$(python - "$WORK/build-console.log" "$GAME_DIR" "$DM_GAME" <<'PY'
+          import sys
+          from pathlib import Path
+
+          log_path = Path(sys.argv[1])
+          game_dir = Path(sys.argv[2]).resolve()
+          title_id = sys.argv[3]
+          extract_root = (game_dir / f"{title_id}_build" / "extract").resolve()
+
+          if not log_path.is_file():
+              raise SystemExit(0)
+
+          candidates = []
+          for line in log_path.read_text(errors="replace").splitlines():
+              marker = "image stays at "
+              if marker not in line:
+                  continue
+              raw_path = line.rsplit(marker, 1)[1].strip().strip('"')
+              candidate = Path(raw_path)
+              if not candidate.is_absolute():
+                  candidate = (Path.cwd() / candidate).resolve()
+              else:
+                  candidate = candidate.resolve()
+              try:
+                  candidate.relative_to(extract_root)
+              except ValueError:
+                  continue
+              if candidate.name == "RomFS.img" and candidate.is_file() and candidate.stat().st_size:
+                  candidates.append(candidate)
+
+          if candidates:
+              # Use the last valid path reported by this build invocation.
+              print(candidates[-1])
+          PY
+            )"
+
+            if [[ -n "$IMAGE_PATH" ]]; then
+              echo "Found standalone RomFS image outside the shader handoff: $IMAGE_PATH"
+              # Both paths are under RUNNER_TEMP; hard-link to avoid a second
+              # full-size copy of the image on the space-constrained runner.
+              ln "$IMAGE_PATH" "$RUNNER_TEMP/romfs-handoff/RomFS.img"
+              touch "$RUNNER_TEMP/romfs-handoff/ready"
+            fi
+          fi
+
           if [[ -s "$RUNNER_TEMP/romfs-handoff/ready" && -s "$RUNNER_TEMP/romfs-handoff/RomFS.img" ]]; then
             echo "romfs_ready=true" >> "$GITHUB_OUTPUT"
-            echo "Shader split completed; standalone RomFS.img is ready for upload."
+            echo "Standalone RomFS.img is ready for upload."
             ls -lh "$RUNNER_TEMP/romfs-handoff/RomFS.img"
           elif [[ -s "$OUTPUT" ]]; then
             echo "romfs_ready=false" >> "$GITHUB_OUTPUT"
-            echo "This build path completed the IPA in the first pass; no RomFS handoff is needed."
+            echo "No standalone RomFS.img was reported by this build; continuing with the completed IPA."
           else
             echo "::error::First pass produced neither a complete IPA nor a valid RomFS handoff."
             exit 1
