@@ -24,6 +24,7 @@ on:
         description: "百度网盘中的 prod.keys 文件路径"
         required: true
         type: string
+        default: "/prod.keys"
       update_path:
         description: "百度网盘中的更新包路径（可留空）"
         required: false
