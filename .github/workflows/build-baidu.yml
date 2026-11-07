@@ -806,10 +806,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/upload_baidu_monitored.py" \\
-            --binary "$BAIDUPCS_BIN" \\
-            --target "$RUNNER_TEMP/romfs-handoff/RomFS.img" \\
-            --remote-dir "$BAIDU_REMOTE_DIR" \\
+          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/upload_baidu_monitored.py" \
+            --binary "$BAIDUPCS_BIN" \
+            --target "$RUNNER_TEMP/romfs-handoff/RomFS.img" \
+            --remote-dir "$BAIDU_REMOTE_DIR" \
             --policy overwrite
           
       - name: Upload RomFS as GitHub Artifact
@@ -900,10 +900,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/upload_baidu_monitored.py" \\
-            --binary "$BAIDUPCS_BIN" \\
-            --target "$RUNNER_TEMP/NxNative.ipa" \\
-            --remote-dir "$BAIDU_REMOTE_DIR" \\
+          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/upload_baidu_monitored.py" \
+            --binary "$BAIDUPCS_BIN" \
+            --target "$RUNNER_TEMP/NxNative.ipa" \
+            --remote-dir "$BAIDU_REMOTE_DIR" \
             --policy overwrite
 
       - name: Audit Disk After Build
