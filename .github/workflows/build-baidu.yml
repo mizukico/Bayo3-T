@@ -801,18 +801,19 @@ jobs:
       - name: Upload RomFS to Baidu Netdisk before Metal
         id: upload_romfs_baidu
         if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.img_target == 'baidu' && steps.verify_baidu_upload.outcome == 'success'
-        timeout-minutes: 40
+        timeout-minutes: 120
         continue-on-error: true
-        uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
-        with:
-          bduss: ${{ secrets.BDUSS }}
-          stoken: ${{ secrets.STOKEN }}
-          target: ${{ runner.temp }}/romfs-handoff/RomFS.img
-          remote-dir: ${{ env.BAIDU_REMOTE_DIR }}
-          upload-policy: overwrite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/upload_baidu_monitored.py" \\
+            --binary "$BAIDUPCS_BIN" \\
+            --target "$RUNNER_TEMP/romfs-handoff/RomFS.img" \\
+            --remote-dir "$BAIDU_REMOTE_DIR" \\
+            --policy overwrite
           
       - name: Upload RomFS as GitHub Artifact
-        if: success() && steps.prepare.outputs.romfs_ready == 'true' && (steps.upload_mode.outputs.img_target == 'artifact' || steps.verify_baidu_upload.outcome != 'success' || steps.upload_romfs_baidu.outcome == 'failure')
+        if: success() && steps.prepare.outputs.romfs_ready == 'true' && (steps.upload_mode.outputs.img_target == 'artifact' || steps.verify_baidu_upload.outcome != 'success' || steps.upload_romfs_baidu.outcome != 'success')
         uses: actions/upload-artifact@v4
         with:
           name: NxNative-ROMFS
@@ -894,15 +895,16 @@ jobs:
       - name: Upload IPA to Baidu Netdisk
         id: upload_ipa_baidu
         if: success() && steps.upload_mode.outputs.ipa_target == 'baidu' && steps.verify_baidu_upload.outcome == 'success' && (steps.upload_mode.outputs.img_target != 'baidu' || steps.prepare.outputs.romfs_ready != 'true' || steps.upload_romfs_baidu.outcome == 'success')
-        timeout-minutes: 40
+        timeout-minutes: 120
         continue-on-error: true
-        uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
-        with:
-          bduss: ${{ secrets.BDUSS }}
-          stoken: ${{ secrets.STOKEN }}
-          target: ${{ runner.temp }}/NxNative.ipa
-          remote-dir: ${{ env.BAIDU_REMOTE_DIR }}
-          upload-policy: overwrite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/upload_baidu_monitored.py" \\
+            --binary "$BAIDUPCS_BIN" \\
+            --target "$RUNNER_TEMP/NxNative.ipa" \\
+            --remote-dir "$BAIDU_REMOTE_DIR" \\
+            --policy overwrite
 
       - name: Audit Disk After Build
         if: always()
