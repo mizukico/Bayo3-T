@@ -21,6 +21,7 @@ Environment:
 from __future__ import annotations
 
 import argparse
+import ast
 import os
 import re
 import shutil
@@ -139,22 +140,35 @@ def patch_dmsh_build(repo: Path) -> bool:
             "inspect the marked block before proceeding."
         )
 
-    anchor = "    if result[1] == 'ok': publish_cache(key, digests[key], rule_fps[key], CODE_FP)"
-    if src.count(anchor) != 1:
+    # The upstream line is nested inside fin()'s try block. Match the
+    # complete physical line and capture its indentation; never match a
+    # substring of the leading spaces (which would dedent the try body).
+    anchor = re.compile(
+        r"(?m)^([ \\t]*)if result\\[1\\] == 'ok': "
+        r"publish_cache\\(key, digests\\[key\\], rule_fps\\[key\\], CODE_FP\\)$"
+    )
+    matches = list(anchor.finditer(src))
+    if len(matches) != 1:
         raise RuntimeError(
             f"Expected exactly one successful-shader publish_cache line in {p}; "
-            f"found {src.count(anchor)}. No unsafe cleanup was added."
+            f"found {len(matches)}. No patch was applied."
         )
 
+    indent = matches[0].group(1)
     replacement = (
-        f"    {MARKER_DM}\n"
-        "    if result[1] == 'ok':\n"
-        "        if os.environ.get('DMSH_DISABLE_SHADER_CAS') != '1':\n"
-        "            publish_cache(key, digests[key], rule_fps[key], CODE_FP)"
+        f"{indent}{MARKER_DM}\\n"
+        f"{indent}if result[1] == 'ok':\\n"
+        f"{indent}    if os.environ.get('DMSH_DISABLE_SHADER_CAS') != '1':\\n"
+        f"{indent}        publish_cache(key, digests[key], rule_fps[key], CODE_FP)"
     )
-    src = src.replace(anchor, replacement, 1)
+    src = anchor.sub(lambda _m: replacement, src, count=1)
+
+    # Validate the fully patched source before writing it into the upstream
+    # checkout. This catches indentation/syntax regressions at patch time.
+    ast.parse(src, filename=str(p))
     p.write_text(src, encoding="utf-8")
     say("[patch] dmsh_build.py: CAS publication can be disabled for ephemeral CI builds")
+    say("[patch] dmsh_build.py: patched source passed Python syntax validation")
     say("[patch] dmsh_build.py: .bin/.spv/.res.json/job files are retained until upstream fin() tasks finish")
     say("[patch] dmsh_build.py: upstream shutil.rmtree(w) remains the only translator-temp cleanup")
     return True
