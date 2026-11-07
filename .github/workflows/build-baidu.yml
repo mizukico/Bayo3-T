@@ -227,54 +227,6 @@ jobs:
               lz4 "capstone>=5,<6" fonttools nsz zbic backports.zstd
           fi
 
-      - name: Preflight Python shader tool syntax
-        if: inputs.device == 'iPhone 15 Pro/Pro Max or newer (standard)'
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "===== NxNative upstream revision ====="
-          git rev-parse HEAD
-
-          # Reproduce build_ipa_from_nsp.py's transitive tool-file walk,
-          # but include each filename in SyntaxError diagnostics.
-          python - <<'PY'
-          import ast
-          from pathlib import Path
-
-          repo = Path.cwd()
-          roots = [repo / d for d in ('dm/gfx/tools', 'dm/ios/tools', 'dm/games')]
-          todo = [repo / 'dm/gfx/tools/dmsh_build.py']
-          seen = set()
-
-          while todo:
-              path = todo.pop()
-              if path in seen or not path.is_file():
-                  continue
-              seen.add(path)
-              try:
-                  tree = ast.parse(path.read_bytes(), filename=str(path))
-              except SyntaxError as exc:
-                  print(
-                      f"::error file={path},line={exc.lineno},col={exc.offset}::{exc.msg}",
-                      flush=True,
-                  )
-                  raise
-              for node in ast.walk(tree):
-                  if isinstance(node, ast.Import):
-                      modules = [item.name for item in node.names]
-                  elif isinstance(node, ast.ImportFrom) and node.module:
-                      modules = [node.module]
-                  else:
-                      continue
-                  todo.extend(
-                      directory / f"{module.split('.')[0]}.py"
-                      for module in modules
-                      for directory in roots
-                  )
-
-          print(f"Python shader tool syntax preflight passed: {len(seen)} files.")
-          PY
-
       - name: Remove stale NxNative temporary files
         shell: bash
         run: |
