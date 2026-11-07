@@ -739,7 +739,7 @@ jobs:
           # do not enter the NVN shader-split handoff. With --romfs separate,
           # NxNative still leaves RomFS.img in the extracted game directory.
           # Recover that exact image from the build log so it is uploaded too.
-          if [[ ! -s "$RUNNER_TEMP/romfs-handoff/ready" || ! -s "$RUNNER_TEMP/romfs-handoff/RomFS.img" ]]; then
+          if [[ "$ROMFS_MODE" == "separate" && ( ! -s "$RUNNER_TEMP/romfs-handoff/ready" || ! -s "$RUNNER_TEMP/romfs-handoff/RomFS.img" ) ]]; then
             IMAGE_PATH="$(python - "$WORK/build-console.log" "$GAME_DIR" "$DM_GAME" <<'PY'
           import sys
           from pathlib import Path
