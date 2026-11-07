@@ -16,6 +16,14 @@ on:
         required: false
         type: string
         default: ""
+      romfs_mode:
+        description: "RomFS handling: separate uploads RomFS.img; bundled keeps RomFS inside the IPA"
+        required: true
+        type: choice
+        default: "separate"
+        options:
+          - "separate"
+          - "bundled"
       game_path:
         description: "百度网盘中的游戏目录；递归下载目录内所有 NSP/XCI 文件"
         required: true
@@ -690,8 +698,9 @@ jobs:
         env:
           DMSH_DISABLE_SHADER_CAS: "1"
           DMSH_TARGETS: ${{ inputs.device == 'iPhone 15 Pro/Pro Max or newer (standard)' && 'ios' || '' }}
-          NX_CI_STOP_AFTER_SPLIT: ${{ inputs.device == 'iPhone 15 Pro/Pro Max or newer (standard)' && '1' || '' }}
-          NX_CI_ROMFS_HANDOFF_DIR: ${{ runner.temp }}/romfs-handoff
+          ROMFS_MODE: ${{ inputs.romfs_mode }}
+          NX_CI_STOP_AFTER_SPLIT: ${{ inputs.romfs_mode == 'separate' && inputs.device == 'iPhone 15 Pro/Pro Max or newer (standard)' && '1' || '' }}
+          NX_CI_ROMFS_HANDOFF_DIR: ${{ inputs.romfs_mode == 'separate' && format('{0}/romfs-handoff', runner.temp) || '' }}
         run: |
           set -euo pipefail
           WORK="$RUNNER_TEMP/nxnative"
@@ -709,12 +718,17 @@ jobs:
             --allow-other-metal
           )
 
-          # Only the Standard upstream supports image-backed --romfs separate.
-          if [[ "${{ inputs.device }}" == "iPhone 15 Pro/Pro Max or newer (standard)" ]]; then
+          # --romfs separate is opt-in. Bundled mode leaves RomFS inside the IPA
+          # and skips all standalone RomFS handoff/upload/release work.
+          if [[ "$ROMFS_MODE" == "separate" ]]; then
+            if [[ "${{ inputs.device }}" != "iPhone 15 Pro/Pro Max or newer (standard)" ]]; then
+              echo "::error::RomFS separate mode is supported only by the Standard NxNative build. Select the Standard device path or choose bundled mode."
+              exit 1
+            fi
             ARGS+=(--romfs separate)
-            echo "Standard mode: pause after NVN shader split for RomFS upload."
+            echo "RomFS mode: separate; standalone RomFS.img will be staged for upload."
           else
-            echo "BC fallback: use its original bundled-RomFS build path."
+            echo "RomFS mode: bundled; no standalone RomFS.img upload or release will be performed."
           fi
 
           python scripts/build_ipa_from_nsp.py \
@@ -835,8 +849,9 @@ jobs:
         env:
           DMSH_DISABLE_SHADER_CAS: "1"
           DMSH_TARGETS: ${{ inputs.device == 'iPhone 15 Pro/Pro Max or newer (standard)' && 'ios' || '' }}
+          ROMFS_MODE: ${{ inputs.romfs_mode }}
           NX_CI_RELEASE_SHADER_SPACE: "1"
-          NX_CI_RELEASE_ROMFS: ${{ inputs.device == 'iPhone 15 Pro/Pro Max or newer (standard)' && '1' || '' }}
+          NX_CI_RELEASE_ROMFS: ${{ inputs.romfs_mode == 'separate' && inputs.device == 'iPhone 15 Pro/Pro Max or newer (standard)' && '1' || '' }}
           NX_CI_RELEASE_NSP_SPACE: "1"
           DM_PSO_GPUS: g18p
           DM_PSO_IOS_MIN: "26.0"
@@ -856,7 +871,7 @@ jobs:
               --allow-other-metal
             )
 
-            if [[ "${{ inputs.device }}" == "iPhone 15 Pro/Pro Max or newer (standard)" ]]; then
+            if [[ "$ROMFS_MODE" == "separate" ]]; then
               ARGS+=(--romfs separate)
             fi
 
