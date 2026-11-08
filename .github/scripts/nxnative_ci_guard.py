@@ -87,6 +87,8 @@ def patch_ipa_builder(repo: Path) -> bool:
     src = p.read_text(encoding="utf-8")
     changed = False
 
+    import re
+
     # Lower only the post-shader / pre-IPA free-space gate for this CI test.
     # Keep the upstream check in place, but change its threshold from 5 GiB
     # to 0.5 GiB. This is separate from the pre-extraction reserve above.
@@ -121,8 +123,6 @@ def patch_ipa_builder(repo: Path) -> bool:
     # NSP/XCI and RomFS.img are released before Metal, so do not reserve the
     # later shader-cache/Metal peak here.
     reserve_marker = "# NX_CI_DISK_GUARD_EXTRACTION_RESERVE"
-
-    import re
 
     reserve_pattern = re.compile(
         r"(?m)^(\s*gb\s*=.*?/ 2\*\*30)\s*\+\s*6(\s*#.*)$"
