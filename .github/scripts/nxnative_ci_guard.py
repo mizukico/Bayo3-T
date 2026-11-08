@@ -91,11 +91,11 @@ def patch_ipa_builder(repo: Path) -> bool:
     # Keep the upstream check in place, but change its threshold from 5 GiB
     # to 0.5 GiB. This is separate from the pre-extraction reserve above.
     ipa_reserve_marker = "# NX_CI_IPA_FREE_SPACE_RESERVE"
-    ipa_reserve_old = "    if not prepare_xcode and free_gb(out_ipa.parent) < 5:\\n"
+    ipa_reserve_old = "    if not prepare_xcode and free_gb(out_ipa.parent) < 5:\n"
     ipa_reserve_new = (
         "    if not prepare_xcode and free_gb(out_ipa.parent) < 0.5:  "
         + ipa_reserve_marker
-        + "\\n"
+        + "\n"
     )
     if ipa_reserve_marker in src:
         say("[patch] build_ipa_from_nsp.py: IPA free-space threshold already set to 0.5 GiB")
@@ -193,7 +193,7 @@ def patch_ipa_builder(repo: Path) -> bool:
             "                if _ci_artifact_image.exists():\n"
             "                    _ci_artifact_image.unlink()\n"
             "                os.link(_ci_main_image, _ci_artifact_image)\n"
-            "                (_ci_handoff / 'ready').write_text('RomFS.img ready\\n', encoding='utf-8')\n"
+            "                (_ci_handoff / 'ready').write_text('RomFS.img ready\n', encoding='utf-8')\n"
             "                say(f'[CI disk guard] shader split complete; RomFS ready for upload: {_ci_main_image} ({_ci_main_image.stat().st_size / 2**30:.2f} GiB)')\n"
             "                say('[CI disk guard] stopping before Metal; the next workflow step uploads RomFS.img')\n"
             "                raise SystemExit(0)\n"
