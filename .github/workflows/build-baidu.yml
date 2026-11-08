@@ -136,7 +136,14 @@ jobs:
 
           VERSION="v4.0.2"
           ARCHIVE="$RUNNER_TEMP/BaiduPCS-Go-$VERSION-darwin-osx-$ARCH.zip"
-          curl -fsSL "https://github.com/qjfoidnh/BaiduPCS-Go/releases/download/$VERSION/BaiduPCS-Go-$VERSION-darwin-osx-$ARCH.zip" -o "$ARCHIVE"
+          SOURCE_ARCHIVE="$GITHUB_WORKSPACE/workflow-tools/BaiduPCS-Go-$VERSION-darwin-osx-$ARCH.zip"
+          if [[ ! -s "$SOURCE_ARCHIVE" ]]; then
+            echo "::error::BaiduPCS-Go package not found in the repository root checkout: $SOURCE_ARCHIVE"
+            echo "::error::Expected archive for runner architecture: $ARCH"
+            exit 1
+          fi
+          cp "$SOURCE_ARCHIVE" "$ARCHIVE"
+          echo "Using repository-root BaiduPCS-Go package: $SOURCE_ARCHIVE"
           unzip -q "$ARCHIVE" -d "$BAIDU_EXTRACT"
           BIN="$(find "$BAIDU_EXTRACT" -type f -name 'BaiduPCS-Go' -print -quit)"
           test -n "$BIN"
