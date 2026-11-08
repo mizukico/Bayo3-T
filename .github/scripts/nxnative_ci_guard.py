@@ -201,7 +201,7 @@ def patch_ipa_builder(repo: Path) -> bool:
             "                if _ci_artifact_image.exists():\n"
             "                    _ci_artifact_image.unlink()\n"
             "                os.link(_ci_main_image, _ci_artifact_image)\n"
-            "                (_ci_handoff / 'ready').write_text('RomFS.img ready\n', encoding='utf-8')\n"
+            "                (_ci_handoff / 'ready').write_text('RomFS.img ready\\n', encoding='utf-8')\n"
             "                say(f'[CI disk guard] shader split complete; RomFS ready for upload: {_ci_main_image} ({_ci_main_image.stat().st_size / 2**30:.2f} GiB)')\n"
             "                say('[CI disk guard] stopping before Metal; the next workflow step uploads RomFS.img')\n"
             "                raise SystemExit(0)\n"
