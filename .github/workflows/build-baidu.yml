@@ -770,8 +770,8 @@ jobs:
         shell: bash
         env:
           DMSH_TARGETS: ${{ inputs.device == 'iPhone 15 Pro/Pro Max or newer (standard)' && 'ios' || '' }}
-          NX_CI_RELEASE_SHADER_SPACE: "1"
           NX_CI_RELEASE_ROMFS: ${{ inputs.device == 'iPhone 15 Pro/Pro Max or newer (standard)' && '1' || '' }}
+          NX_CI_RELEASE_NSP_SPACE: "1"
         run: |
           set -euo pipefail
           WORK="$RUNNER_TEMP/nxnative"
