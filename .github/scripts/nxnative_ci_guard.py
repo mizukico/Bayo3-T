@@ -87,6 +87,28 @@ def patch_ipa_builder(repo: Path) -> bool:
     src = p.read_text(encoding="utf-8")
     changed = False
 
+    # Lower only the post-shader / pre-IPA free-space gate for this CI test.
+    # Keep the upstream check in place, but change its threshold from 5 GiB
+    # to 0.5 GiB. This is separate from the pre-extraction reserve above.
+    ipa_reserve_marker = "# NX_CI_IPA_FREE_SPACE_RESERVE"
+    ipa_reserve_old = "    if not prepare_xcode and free_gb(out_ipa.parent) < 5:\\n"
+    ipa_reserve_new = (
+        "    if not prepare_xcode and free_gb(out_ipa.parent) < 0.5:  "
+        + ipa_reserve_marker
+        + "\\n"
+    )
+    if ipa_reserve_marker in src:
+        say("[patch] build_ipa_from_nsp.py: IPA free-space threshold already set to 0.5 GiB")
+    elif src.count(ipa_reserve_old) == 1:
+        src = src.replace(ipa_reserve_old, ipa_reserve_new, 1)
+        changed = True
+        say("[patch] build_ipa_from_nsp.py: IPA free-space threshold reduced from 5 GiB to 0.5 GiB")
+    else:
+        raise RuntimeError(
+            "Could not uniquely identify the upstream 5 GiB pre-IPA free-space check; "
+            f"found {src.count(ipa_reserve_old)} matches, refusing to modify the builder."
+        )
+
     # The pre-extraction guard only needs to cover extraction at this point.
     # NSP/XCI and RomFS.img are released before Metal, so do not reserve the
     # later shader-cache/Metal peak here.
