@@ -135,7 +135,7 @@ def patch_ipa_builder(repo: Path) -> bool:
                 "refusing to change an unknown upstream version."
             )
         metal_reserve_replacement = (
-            f"    {metal_reserve_marker}\\n"
+            f"    {metal_reserve_marker}\n"
             "    if not prepare_xcode and free_gb(out_ipa.parent) < 0.5: raise BuildError(f'less than 0.5 GB free on the volume of {out_ipa.parent}')"
         )
         src = src.replace(metal_reserve_anchor, metal_reserve_replacement, 1)
