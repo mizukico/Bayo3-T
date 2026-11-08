@@ -155,6 +155,8 @@ jobs:
           set -euo pipefail
           GUARD="$GITHUB_WORKSPACE/workflow-tools/.github/scripts/nxnative_ci_guard.py"
           python "$GUARD" patch "$GITHUB_WORKSPACE"
+          echo "===== Validate patched NxNative Python syntax ====="
+          python -m py_compile "$GITHUB_WORKSPACE/scripts/build_ipa_from_nsp.py"
 
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@v4
