@@ -94,15 +94,15 @@ def patch_ipa_builder(repo: Path) -> bool:
     # Match the guard condition independently of whether upstream keeps the
     # BuildError on the same line or moves it to the following line.
     ipa_reserve_pattern = re.compile(
-        r"(?m)^([ \\t]*)if not prepare_xcode and "
-        r"free_gb\\(out_ipa\\.parent\\) < 5(:.*)$"
+        r"(?m)^([ \t]*)if not prepare_xcode and "
+        r"free_gb\(out_ipa\.parent\) < 5(:.*)$"
     )
     if ipa_reserve_marker in src:
         say("[patch] build_ipa_from_nsp.py: IPA free-space threshold already set to 0.5 GiB")
     else:
         src, replacements = ipa_reserve_pattern.subn(
             lambda m: (
-                m.group(1) + ipa_reserve_marker + "\\n"
+                m.group(1) + ipa_reserve_marker + "\n"
                 + m.group(1) + "if not prepare_xcode and "
                 + "free_gb(out_ipa.parent) < 0.5" + m.group(2)
             ),
