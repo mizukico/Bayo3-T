@@ -122,6 +122,26 @@ def patch_ipa_builder(repo: Path) -> bool:
         changed = True
         say("[patch] build_ipa_from_nsp.py: extraction reserve reduced from 6 GiB to 0.5 GiB")
 
+    # Lower only the post-shader / pre-IPA free-space gate from 5 GiB to 0.5 GiB.
+    # This is a test threshold; it does not free disk space or change other reserves.
+    metal_reserve_marker = "# NX_CI_DISK_GUARD_METAL_MIN_FREE_0_5_GIB"
+    if metal_reserve_marker in src:
+        say("[patch] build_ipa_from_nsp.py: Metal/IPA minimum free space already set to 0.5 GiB")
+    else:
+        metal_reserve_anchor = "    if not prepare_xcode and free_gb(out_ipa.parent) < 5: raise BuildError(f'less than 5 GB free on the volume of {out_ipa.parent}')"
+        if src.count(metal_reserve_anchor) != 1:
+            raise RuntimeError(
+                f"Could not uniquely identify the upstream 5 GiB pre-IPA free-space check in {p}; "
+                "refusing to change an unknown upstream version."
+            )
+        metal_reserve_replacement = (
+            f"    {metal_reserve_marker}\\n"
+            "    if not prepare_xcode and free_gb(out_ipa.parent) < 0.5: raise BuildError(f'less than 0.5 GB free on the volume of {out_ipa.parent}')"
+        )
+        src = src.replace(metal_reserve_anchor, metal_reserve_replacement, 1)
+        changed = True
+        say("[patch] build_ipa_from_nsp.py: post-shader/pre-IPA minimum free space reduced from 5 GiB to 0.5 GiB")
+
     # Only the newer upstream builder has image-backed RomFS and --romfs separate.
     # The BC fallback checkout is older and keeps a directory-based RomFS bundled.
     supports_separate = (
