@@ -655,13 +655,11 @@ jobs:
 
       - name: Upload RomFS to Baidu Netdisk before Metal
         if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.target == 'baidu'
-        uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
-        with:
-          bduss: ${{ secrets.BDUSS }}
-          stoken: ${{ secrets.STOKEN }}
-          target: ${{ runner.temp }}/romfs-handoff/RomFS.img
-          remote-dir: ${{ env.BAIDU_REMOTE_DIR }}
-          upload-policy: overwrite
+        timeout-minutes: 120
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$BAIDUPCS_BIN" upload --policy overwrite "$RUNNER_TEMP/romfs-handoff/RomFS.img" "$BAIDU_REMOTE_DIR"
           
       - name: Upload RomFS as GitHub Artifact
         if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.target == 'artifact'
@@ -727,13 +725,11 @@ jobs:
 
       - name: Upload IPA to Baidu Netdisk
         if: success() && steps.upload_mode.outputs.target == 'baidu'
-        uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
-        with:
-          bduss: ${{ secrets.BDUSS }}
-          stoken: ${{ secrets.STOKEN }}
-          target: ${{ runner.temp }}/NxNative.ipa
-          remote-dir: ${{ env.BAIDU_REMOTE_DIR }}
-          upload-policy: overwrite
+        timeout-minutes: 120
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$BAIDUPCS_BIN" upload --policy overwrite "$RUNNER_TEMP/NxNative.ipa" "$BAIDU_REMOTE_DIR"
 
       - name: Audit Disk After Build
         if: always()
