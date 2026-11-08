@@ -40,8 +40,16 @@ on:
         required: false
         type: string
         default: ""
-      upload_target:
-        description: "Choose where to upload build outputs"
+      img_upload_target:
+        description: "RomFS.img upload destination"
+        required: true
+        type: choice
+        default: "artifact"
+        options:
+          - "artifact"
+          - "baidu"
+      ipa_upload_target:
+        description: "IPA upload destination"
         required: true
         type: choice
         default: "artifact"
@@ -87,7 +95,8 @@ jobs:
         id: upload_mode
         shell: bash
         env:
-          REQUESTED_UPLOAD_TARGET: ${{ inputs.upload_target }}
+          REQUESTED_IMG_TARGET: ${{ inputs.img_upload_target }}
+          REQUESTED_IPA_TARGET: ${{ inputs.ipa_upload_target }}
           BDUSS: ${{ secrets.BDUSS }}
           STOKEN: ${{ secrets.STOKEN }}
         run: |
@@ -96,15 +105,18 @@ jobs:
             echo "::error::Missing repository secrets BDUSS or STOKEN. Baidu Netdisk is required as the build input source."
             exit 1
           fi
-          echo "target=$REQUESTED_UPLOAD_TARGET" >> "$GITHUB_OUTPUT"
-          echo "Effective upload target: $REQUESTED_UPLOAD_TARGET"
+          echo "img_target=$REQUESTED_IMG_TARGET" >> "$GITHUB_OUTPUT"
+          echo "ipa_target=$REQUESTED_IPA_TARGET" >> "$GITHUB_OUTPUT"
+          echo "Effective RomFS upload target: $REQUESTED_IMG_TARGET"
+          echo "Effective IPA upload target: $REQUESTED_IPA_TARGET"
 
       - name: Install BaiduPCS-Go and log in
         shell: bash
         env:
           BDUSS: ${{ secrets.BDUSS }}
           STOKEN: ${{ secrets.STOKEN }}
-          REQUESTED_UPLOAD_TARGET: ${{ inputs.upload_target }}
+          REQUESTED_IMG_TARGET: ${{ inputs.img_upload_target }}
+          REQUESTED_IPA_TARGET: ${{ inputs.ipa_upload_target }}
         run: |
           set -euo pipefail
 
@@ -143,7 +155,7 @@ jobs:
 
           "$BAIDU_BIN" who
 
-          if [[ "$REQUESTED_UPLOAD_TARGET" == "baidu" ]]; then
+          if [[ "$REQUESTED_IMG_TARGET" == "baidu" || "$REQUESTED_IPA_TARGET" == "baidu" ]]; then
             "$BAIDU_BIN" ls /
             REMOTE_DIR="/NxNative-Build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
             "$BAIDU_BIN" mkdir "$REMOTE_DIR"
@@ -153,7 +165,7 @@ jobs:
 
       - name: Create a 1 MiB Baidu upload preflight file
         id: baidu_preflight
-        if: steps.upload_mode.outputs.target == 'baidu'
+        if: (steps.upload_mode.outputs.img_target == 'baidu' || steps.upload_mode.outputs.ipa_target == 'baidu')
         shell: bash
         run: |
           set -euo pipefail
@@ -164,7 +176,32 @@ jobs:
           echo "Preflight file generated: $(ls -lh "$TEST_FILE")"
 
       - name: Verify Baidu upload with the production Action
-        if: steps.upload_mode.outputs.target == 'baidu'
+        if: (steps.upload_mode.outputs.img_target == 'baidu' || steps.upload_mode.outputs.ipa_target == 'baidu')
+        uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
+        with:
+          bduss: ${{ secrets.BDUSS }}
+          stoken: ${{ secrets.STOKEN }}
+          target: ${{ steps.baidu_preflight.outputs.path }}
+          remote-dir: ${{ env.BAIDU_REMOTE_DIR }}
+          upload-policy: skip
+
+      - name: Create a 1 MiB Baidu upload preflight file
+        id: baidu_preflight
+        if: steps.upload_mode.outputs.img_target == 'baidu' || steps.upload_mode.outputs.ipa_target == 'baidu'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEST_FILE="$RUNNER_TEMP/NxNative-baidu-preflight-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.bin"
+          dd if=/dev/urandom of="$TEST_FILE" bs=1048576 count=1
+          test "$(stat -f%z "$TEST_FILE")" -eq 1048576
+          echo "path=$TEST_FILE" >> "$GITHUB_OUTPUT"
+          echo "Preflight file generated: $(ls -lh "$TEST_FILE")"
+
+      - name: Verify Baidu upload with the production Action
+        id: verify_baidu_upload
+        if: steps.upload_mode.outputs.img_target == 'baidu' || steps.upload_mode.outputs.ipa_target == 'baidu'
+        timeout-minutes: 10
+        continue-on-error: true
         uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
         with:
           bduss: ${{ secrets.BDUSS }}
@@ -720,17 +757,21 @@ jobs:
           fi
 
       - name: Upload RomFS to Baidu Netdisk before Metal
-        if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.target == 'baidu'
-        uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
-        with:
-          bduss: ${{ secrets.BDUSS }}
-          stoken: ${{ secrets.STOKEN }}
-          target: ${{ runner.temp }}/romfs-handoff/RomFS.img
-          remote-dir: ${{ env.BAIDU_REMOTE_DIR }}
-          upload-policy: overwrite
+        id: upload_romfs_baidu
+        if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.img_target == 'baidu' && steps.verify_baidu_upload.outcome == 'success'
+        timeout-minutes: 120
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/upload_baidu_monitored.py" \
+            --binary "$BAIDUPCS_BIN" \
+            --target "$RUNNER_TEMP/romfs-handoff/RomFS.img" \
+            --remote-dir "$BAIDU_REMOTE_DIR" \
+            --policy overwrite
           
       - name: Upload RomFS as GitHub Artifact
-        if: success() && steps.prepare.outputs.romfs_ready == 'true' && steps.upload_mode.outputs.target == 'artifact'
+        if: success() && steps.prepare.outputs.romfs_ready == 'true' && (steps.upload_mode.outputs.img_target == 'artifact' || steps.verify_baidu_upload.outcome != 'success' || steps.upload_romfs_baidu.outcome != 'success')
         uses: actions/upload-artifact@v4
         with:
           name: NxNative-ROMFS
@@ -792,14 +833,18 @@ jobs:
           ls -lh "$OUTPUT"
 
       - name: Upload IPA to Baidu Netdisk
-        if: success() && steps.upload_mode.outputs.target == 'baidu'
-        uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
-        with:
-          bduss: ${{ secrets.BDUSS }}
-          stoken: ${{ secrets.STOKEN }}
-          target: ${{ runner.temp }}/NxNative.ipa
-          remote-dir: ${{ env.BAIDU_REMOTE_DIR }}
-          upload-policy: overwrite
+        id: upload_ipa_baidu
+        if: success() && steps.upload_mode.outputs.ipa_target == 'baidu' && steps.verify_baidu_upload.outcome == 'success' && (steps.upload_mode.outputs.img_target != 'baidu' || steps.prepare.outputs.romfs_ready != 'true' || steps.upload_romfs_baidu.outcome == 'success')
+        timeout-minutes: 120
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/upload_baidu_monitored.py" \
+            --binary "$BAIDUPCS_BIN" \
+            --target "$RUNNER_TEMP/NxNative.ipa" \
+            --remote-dir "$BAIDU_REMOTE_DIR" \
+            --policy overwrite
 
       - name: Audit Disk After Build
         if: always()
@@ -836,7 +881,7 @@ jobs:
           python "$GITHUB_WORKSPACE/workflow-tools/.github/scripts/nxnative_ci_guard.py" stop
 
       - name: Upload IPA as GitHub Artifact
-        if: success() && steps.upload_mode.outputs.target == 'artifact'
+        if: success() && (steps.upload_mode.outputs.ipa_target == 'artifact' || steps.verify_baidu_upload.outcome != 'success' || steps.upload_ipa_baidu.outcome != 'success')
         uses: actions/upload-artifact@v4
         with:
           name: NxNative-IPA-${{ inputs.device == 'iPhone 15 or older (BC fallback)' && 'BC-Fallback' || 'Standard' }}
