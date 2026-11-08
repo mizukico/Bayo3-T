@@ -188,13 +188,18 @@ jobs:
             python -m pip install -r "$REQUIREMENTS" gdown
 
             # Python 3.13 does not include compression.zstd in the standard library.
-            if python -c 'import sys; raise SystemExit(sys.version_info < (3, 14))'; then
-              python -m pip install backports.zstd
+            # Install the compatibility package on Python versions below 3.14.
+            if python -c 'import sys; raise SystemExit(sys.version_info >= (3, 14))'; then
+              python -m pip install --upgrade backports.zstd
             fi
 
             echo "===== Verify NxNative Python prerequisites ====="
             python -m pip show zbic
+            python -m pip show backports.zstd || true
             python -c 'import sys, zbic, lz4.block, capstone, fontTools; print("Verified Python:", sys.executable); print("zbic:", zbic.__file__)'
+            if python -c 'import sys; raise SystemExit(sys.version_info < (3, 14))'; then
+              python -c 'import sys, backports.zstd; print("Verified backports.zstd:", backports.zstd.__file__); print("Verified Python:", sys.executable)'
+            fi
           else
             # The pinned BC-fallback checkout predates the upstream tools.txt manifest.
             python -m pip install lz4 capstone fonttools backports.zstd gdown
