@@ -148,9 +148,9 @@ def patch_dmsh_build(repo: Path) -> bool:
 
     replacement = (
         f"    {MARKER_DM}\n"
-        "    if result[1] == 'ok':\n"
-        "        if os.environ.get('DMSH_DISABLE_SHADER_CAS') != '1':\n"
-        "            publish_cache(key, digests[key], rule_fps[key], CODE_FP)"
+        "        if result[1] == 'ok':\n"
+        "            if os.environ.get('DMSH_DISABLE_SHADER_CAS') != '1':\n"
+        "                publish_cache(key, digests[key], rule_fps[key], CODE_FP)"
     )
     src = src.replace(anchor, replacement, 1)
     p.write_text(src, encoding="utf-8")
