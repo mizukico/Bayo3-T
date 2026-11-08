@@ -182,18 +182,19 @@ jobs:
           echo "path=$TEST_FILE" >> "$GITHUB_OUTPUT"
           echo "Preflight file generated: $(ls -lh "$TEST_FILE")"
 
-      - name: Verify Baidu upload with the production Action
+      - name: Verify Baidu upload with the installed BaiduPCS-Go
         id: verify_baidu_upload
         if: steps.upload_mode.outputs.img_target == 'baidu' || steps.upload_mode.outputs.ipa_target == 'baidu'
         timeout-minutes: 10
         continue-on-error: true
-        uses: CHC383/baidu-netdisk-upload-action@9c2bcddb20aba2a826de949007a88bbb508bca51
-        with:
-          bduss: ${{ secrets.BDUSS }}
-          stoken: ${{ secrets.STOKEN }}
-          target: ${{ steps.baidu_preflight.outputs.path }}
-          remote-dir: ${{ env.BAIDU_REMOTE_DIR }}
-          upload-policy: skip
+        shell: bash
+        env:
+          PREFLIGHT_FILE: ${{ steps.baidu_preflight.outputs.path }}
+        run: |
+          set -euo pipefail
+          test -x "$BAIDUPCS_BIN"
+          test -s "$PREFLIGHT_FILE"
+          "$BAIDUPCS_BIN" upload --policy skip "$PREFLIGHT_FILE" "$BAIDU_REMOTE_DIR"
 
       - name: Set up Python
         uses: actions/setup-python@v5
